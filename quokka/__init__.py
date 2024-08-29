@@ -8,8 +8,8 @@ try:
 except ImportError:
     pass
 
-from . import quokka as vape_py
+from . import quokka as quokka_py
 
-__doc__ = vape_py.__doc__
-if hasattr(vape_py, "__all__"):
-    __all__ = vape_py.__all__
+__doc__ = quokka_py.__doc__
+if hasattr(quokka_py, "__all__"):
+    __all__ = quokka_py.__all__

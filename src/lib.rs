@@ -1,9 +1,10 @@
 use camera::{Camera, OrthographicProjection};
 use cmap::LinearSegmentedColorMap;
 use controller::CameraController;
+use image::ImageReader;
 use renderer::{RenderSettings, VolumeRenderer};
 use ssao::SSAOTextures;
-use std::{path::PathBuf, sync::Arc};
+use std::{io::Cursor, path::PathBuf, sync::Arc};
 use volume::VolumeGPU;
 
 #[cfg(target_arch = "wasm32")]
@@ -425,8 +426,14 @@ pub async fn open_window(
     let version = env!("CARGO_PKG_VERSION");
     let name = env!("CARGO_PKG_NAME");
 
+    let icon = ImageReader::new(Cursor::new(include_bytes!("../public/icon.png"))).with_guessed_format().unwrap().decode().unwrap().resize(64, 64, image::imageops::FilterType::Lanczos3);
+    let icon_width = icon.width();
+    let icon_height = icon.height();
+
     let window = window_builder
         .with_title(format!("{name} {version}"))
+        .with_window_icon(Some(winit::window::Icon::from_rgba(
+            icon.into_rgba8().into_vec(),icon_width,icon_height).unwrap()))
         .build(&event_loop)
         .unwrap();
 

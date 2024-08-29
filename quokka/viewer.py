@@ -12,7 +12,7 @@ from matplotlib.colors import Colormap
 import numpy as np
 from IPython.display import DisplayObject
 
-VAPE_URL = os.environ.get("VAPE_URL", "https://keksboter.github.io/quokka")
+quokka_URL = os.environ.get("QUOKKA_URL", "https://keksboter.github.io/quokka")
 
 
 _TEMPLATE_IFRAME = """
@@ -133,7 +133,7 @@ class VolumeViewer(DisplayObject):
             canvas_width=settings.width,
             canvas_height=settings.height,
             settings_json=json.dumps(dataclasses.asdict(settings)),
-            viewer_url=VAPE_URL,
+            viewer_url=QUOKKA_URL,
         )
         return html_code
 

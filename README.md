@@ -1,3 +1,7 @@
+<p align="center">
+  <img width="25%" src="public/icon.png" />
+</p>
+
 # Quokka - Interactive Volume visualization
 
 [![PyPI](https://img.shields.io/pypi/v/quokka.svg)](https://pypi.org/project/quokka/)
