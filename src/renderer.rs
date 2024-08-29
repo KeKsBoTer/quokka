@@ -42,7 +42,7 @@ impl VolumeRenderer {
                 targets: &[
                     Some(wgpu::ColorTargetState {
                         format: color_format,
-                        blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+                        blend: None,//Some(wgpu::BlendState::REPLACE),
                         write_mask: wgpu::ColorWrites::ALL,
                     }),
                     Some(wgpu::ColorTargetState {
@@ -313,6 +313,8 @@ pub struct RenderSettings {
     pub ssao_radius: f32,
     pub ssao_bias: f32,
     pub ssao_kernel_size:u32,
+
+    pub background_color:wgpu::Color,
 }
 
 impl Default for RenderSettings {
@@ -340,6 +342,7 @@ impl Default for RenderSettings {
             ssao_radius: 0.4,
             ssao_bias: 0.02,
             ssao_kernel_size:64,
+            background_color:wgpu::Color::BLACK,
         }
     }
 }
@@ -376,6 +379,8 @@ pub struct RenderSettingsUniform {
     step_size: f32,
     ssao_radius: f32,
     ssao_bias: f32,
+
+    background_color: Vector4<f32>,
 
     ssao_kernel_size:u32,
     _pad: [u32; 3],
@@ -416,6 +421,12 @@ impl RenderSettingsUniform {
             ssao_radius: settings.ssao_radius,
             ssao_bias: settings.ssao_bias,
             ssao_kernel_size:settings.ssao_kernel_size,
+            background_color:Vector4::new(
+                settings.background_color.r as f32,
+                settings.background_color.g as f32,
+                settings.background_color.b as f32,
+                settings.background_color.a as f32,
+            ),
             _pad: [0; 3],
         }
     }
@@ -451,6 +462,7 @@ impl Default for RenderSettingsUniform {
             ssao_radius: 0.4,
             ssao_bias: 0.02,
             ssao_kernel_size:64,
+            background_color:Vector4::new(0.,0.,0.,1.),
             _pad: [0; 3],
         }
     }

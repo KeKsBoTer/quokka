@@ -53,13 +53,13 @@ pub(crate) fn ui(state: &mut WindowContext) {
 
                 ui.label("Background");
                 let mut bg = [
-                    state.background_color.r as f32,
-                    state.background_color.g as f32,
-                    state.background_color.b as f32,
-                    state.background_color.a as f32,
+                    state.render_settings.background_color.r as f32,
+                    state.render_settings.background_color.g as f32,
+                    state.render_settings.background_color.b as f32,
+                    state.render_settings.background_color.a as f32,
                 ];
                 ui.color_edit_button_rgba_premultiplied(&mut bg);
-                state.background_color = wgpu::Color {
+                state.render_settings.background_color = wgpu::Color {
                     r: bg[0] as f64,
                     g: bg[1] as f64,
                     b: bg[2] as f64,
@@ -392,72 +392,89 @@ pub(crate) fn ui(state: &mut WindowContext) {
                     });
 
                 ui.collapsing("Advanced", |ui| {
-                    egui::collapsing_header::CollapsingHeader::new("Phong Shading").open(Some(true)).show(ui, |ui|{
-                    egui::Grid::new("iso_surface_settings_phong")
-                        .num_columns(2)
-                        .striped(true)
+                    egui::collapsing_header::CollapsingHeader::new("Phong Shading")
+                        .open(Some(true))
                         .show(ui, |ui| {
-                            ui.label("Shininess");
-                            ui.add(
-                                egui::DragValue::new(&mut state.render_settings.iso_shininess)
-                                    .range((0.)..=1e6),
-                            );
-                            ui.end_row();
+                            egui::Grid::new("iso_surface_settings_phong")
+                                .num_columns(2)
+                                .striped(true)
+                                .show(ui, |ui| {
+                                    ui.label("Shininess");
+                                    ui.add(
+                                        egui::DragValue::new(
+                                            &mut state.render_settings.iso_shininess,
+                                        )
+                                        .range((0.)..=1e6),
+                                    );
+                                    ui.end_row();
 
-                            ui.label("Ambient Color");
-                            color_edit_button_rgb(ui, &mut state.render_settings.iso_ambient_color);
-                            ui.end_row();
+                                    ui.label("Ambient Color");
+                                    color_edit_button_rgb(
+                                        ui,
+                                        &mut state.render_settings.iso_ambient_color,
+                                    );
+                                    ui.end_row();
 
-                            ui.label("Specular Color");
-                            color_edit_button_rgb(
-                                ui,
-                                &mut state.render_settings.iso_specular_color,
-                            );
-                            ui.end_row();
+                                    ui.label("Specular Color");
+                                    color_edit_button_rgb(
+                                        ui,
+                                        &mut state.render_settings.iso_specular_color,
+                                    );
+                                    ui.end_row();
 
-                            ui.label("Light Color");
-                            color_edit_button_rgb(ui, &mut state.render_settings.iso_light_color);
-                            ui.end_row();
+                                    ui.label("Light Color");
+                                    color_edit_button_rgb(
+                                        ui,
+                                        &mut state.render_settings.iso_light_color,
+                                    );
+                                    ui.end_row();
+                                });
                         });
-                    });
-                    egui::collapsing_header::CollapsingHeader::new("SSAO").open(Some(true)).show(ui, |ui|{
-                        egui::Grid::new("iso_surface_settings_ssao")
-                        .num_columns(2)
-                        .striped(true)
+                    egui::collapsing_header::CollapsingHeader::new("SSAO")
+                        .open(Some(true))
                         .show(ui, |ui| {
-                            if state.render_settings.ssao {
-                                ui.label("Radius");
-                                ui.add(egui::Slider::new(
-                                    &mut state.render_settings.ssao_radius,
-                                    0.01..=2.0,
-                                ));
-                                ui.end_row();
-                                ui.label("Bias");
-                                ui.add(
-                                    egui::Slider::new(
-                                        &mut state.render_settings.ssao_bias,
-                                        0.001..=0.2,
-                                    )
-                                    .logarithmic(true),
-                                );
-                                ui.end_row();
-                                ui.label("Kernel Size");
-                                ui.add(
-                                    egui::Slider::new(
-                                        &mut state.render_settings.ssao_kernel_size,
-                                        1..=256,
-                                    )
-                                    .logarithmic(true),
-                                );
-                                ui.end_row();
-                            }
-                            if state.render_settings.spatial_filter == wgpu::FilterMode::Nearest {
-                                ui.label("Cube Surface Normal");
-                                ui.checkbox(&mut state.render_settings.use_cube_surface_grad, "");
-                                ui.end_row();
-                            }
+                            egui::Grid::new("iso_surface_settings_ssao")
+                                .num_columns(2)
+                                .striped(true)
+                                .show(ui, |ui| {
+                                    if state.render_settings.ssao {
+                                        ui.label("Radius");
+                                        ui.add(egui::Slider::new(
+                                            &mut state.render_settings.ssao_radius,
+                                            0.01..=2.0,
+                                        ));
+                                        ui.end_row();
+                                        ui.label("Bias");
+                                        ui.add(
+                                            egui::Slider::new(
+                                                &mut state.render_settings.ssao_bias,
+                                                0.001..=0.2,
+                                            )
+                                            .logarithmic(true),
+                                        );
+                                        ui.end_row();
+                                        ui.label("Kernel Size");
+                                        ui.add(
+                                            egui::Slider::new(
+                                                &mut state.render_settings.ssao_kernel_size,
+                                                1..=256,
+                                            )
+                                            .logarithmic(true),
+                                        );
+                                        ui.end_row();
+                                    }
+                                    if state.render_settings.spatial_filter
+                                        == wgpu::FilterMode::Nearest
+                                    {
+                                        ui.label("Cube Surface Normal");
+                                        ui.checkbox(
+                                            &mut state.render_settings.use_cube_surface_grad,
+                                            "",
+                                        );
+                                        ui.end_row();
+                                    }
+                                });
                         });
-                    });
                 });
             });
     }
@@ -484,29 +501,30 @@ pub(crate) fn ui(state: &mut WindowContext) {
         });
     }
 
-    if state.show_box {
-        let frame_rect = ctx.available_rect();
-        egui::Area::new(egui::Id::new("bbox"))
-            .anchor(Align2::LEFT_BOTTOM, Vec2::new(0., 0.))
-            .interactable(false)
-            .order(Order::Background)
-            .show(ctx, |ui| {
-                let (response, painter) = ui.allocate_painter(
-                    vec2(frame_rect.width(), frame_rect.height()),
-                    Sense {
-                        click: false,
-                        drag: false,
-                        focusable: false,
-                    },
-                );
+    let frame_rect = ctx.available_rect();
+    egui::Area::new(egui::Id::new("bbox"))
+        .anchor(Align2::LEFT_BOTTOM, Vec2::new(0., 0.))
+        .interactable(false)
+        .order(Order::Background)
+        .show(ctx, |ui| {
+            let (response, painter) = ui.allocate_painter(
+                vec2(frame_rect.width(), frame_rect.height()),
+                Sense {
+                    click: false,
+                    drag: false,
+                    focusable: false,
+                },
+            );
 
-                let to_screen = emath::RectTransform::from_to(
-                    Rect::from_two_pos(Pos2::new(-1.0, -1.0), Pos2::new(1.0, 1.0)),
-                    response.rect,
-                );
+            let to_screen = emath::RectTransform::from_to(
+                Rect::from_two_pos(Pos2::new(-1.0, -1.0), Pos2::new(1.0, 1.0)),
+                response.rect,
+            );
+            let t = state.camera.proj_matrix() * state.camera.view_matrix();
+
+            if state.show_box {
                 // bbox
                 let aabb = state.volume.volume.aabb;
-                let t = state.camera.proj_matrix() * state.camera.view_matrix();
                 aabb.corners();
                 let corners = aabb.corners().map(|p| {
                     let p_screen = t.transform_point(p);
@@ -532,8 +550,25 @@ pub(crate) fn ui(state: &mut WindowContext) {
                         Stroke::new(3., color),
                     ));
                 }
-            });
-    }
+            }
+            if state.controller.right_mouse_pressed {
+                let cam_center = t.transform_point(state.controller.center);
+                let cam_center_ui = to_screen.transform_pos(pos2(cam_center.x, cam_center.y));
+                painter.add(egui::Shape::circle_stroke(
+                    cam_center_ui,
+                    10.,
+                    Stroke::new(
+                        3.,
+                        egui::Color32::from_rgba_unmultiplied(255, 255, 255, 100),
+                    ),
+                ));
+                painter.add(egui::Shape::circle_stroke(
+                    cam_center_ui,
+                    13.,
+                    Stroke::new(3., egui::Color32::from_rgba_unmultiplied(0, 0, 0, 100)),
+                ));
+            }
+        });
 }
 
 use cgmath::{Angle, InnerSpace, Transform, Vector3, Vector4};

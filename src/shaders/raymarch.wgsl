@@ -42,6 +42,10 @@ struct Settings {
     step_size:f32,
     ssao_radius: f32,
     ssao_bias: f32,
+    
+    background_color:vec4<f32>,
+
+    ssao_kernel_size:u32,
 }
 
 
@@ -285,7 +289,7 @@ fn trace_ray(ray_in: Ray, normal_depth: ptr<function,vec4<f32>>) -> vec4<f32> {
     let intersec = intersectAABB(ray, aabb_min, aabb_max);
 
     if intersec.x > intersec.y {
-        return vec4<f32>(0.);
+        return settings.background_color;
     }
 
     let start_cam_pos = ray.orig;
@@ -341,7 +345,7 @@ fn trace_ray(ray_in: Ray, normal_depth: ptr<function,vec4<f32>>) -> vec4<f32> {
 
     // used for iso surface rendering
     var first = true;
-    var sign = 1.;
+    var sign = -1.;
     loop{
         if settings.spatial_filter == FILTER_NEAREST {
             sample_pos = next_pos_dda(&pos, &step_size, start_point, ray.dir, &state);
@@ -361,18 +365,23 @@ fn trace_ray(ray_in: Ray, normal_depth: ptr<function,vec4<f32>>) -> vec4<f32> {
             let iso_threshold = settings.iso_threshold;
             let new_sign = sign(sample - iso_threshold);
 
-            if sign != new_sign && !first {
+            if sign != new_sign {
                 let t = (iso_threshold - last_sample) / (sample - last_sample + 1e-4);
                 let intersection = mix(last_sample_pos, sample_pos.xyz, t);
+
+                let view_dir = ray.dir;
+                let light_dir = normalize(ray.dir + vec3<f32>(0.1));
 
                 if bool(settings.use_cube_surface_grad) && settings.spatial_filter == FILTER_NEAREST {
                     normal = last_normal;
                 } else {
-                    let gradient = sample_volume_gradient(intersection);
-                    normal = -sign * normalize(gradient);
+                    let gradient = normalize(sample_volume_gradient(intersection));
+                    if first {
+                        normal = light_dir;
+                    } else {
+                        normal = -sign * gradient;
+                    }
                 }
-                let light_dir = normalize(ray.dir + vec3<f32>(0.1));
-                let view_dir = ray.dir;
 
                 let diffuse_color = settings.iso_diffuse_color;
                 let ambient_color = settings.iso_ambient_color;
@@ -384,16 +393,19 @@ fn trace_ray(ray_in: Ray, normal_depth: ptr<function,vec4<f32>>) -> vec4<f32> {
                 var radiance = ambient_color;
 
                 let irradiance = max(dot(light_dir, normal), 0.0) * irradi_perp;
-                if irradiance > 0.0 {
-                    let brdf = phongBRDF(light_dir, view_dir, normal, diffuse_color.rgb, specular_color, shininess);
-                    radiance += brdf * irradiance * light_color;
+                if !first{
+                    if irradiance > 0.0 {
+                        let brdf = phongBRDF(light_dir, view_dir, normal, diffuse_color.rgb, specular_color, shininess);
+                        radiance += brdf * irradiance * light_color;
+                    }
+                }else{
+                    radiance += diffuse_color.rgb;
                 }
 
                 depth = distance(start_cam_pos, pos);
-                let a = 1.; // always fully opaque //diffuse_color.a;
-                color += transmittance * a * radiance;
+                color += transmittance * radiance;
 
-                transmittance *= 1. - a;
+                transmittance = 0.;
 
                 break;
             }
@@ -430,7 +442,7 @@ fn trace_ray(ray_in: Ray, normal_depth: ptr<function,vec4<f32>>) -> vec4<f32> {
         normal = (camera.view * vec4<f32>(normal, 0.0)).xyz;
     }
     *normal_depth = vec4<f32>(normal, depth);
-    return vec4<f32>(color, 1. - transmittance);
+    return blend(vec4<f32>(color, 1. - transmittance),settings.background_color);
 }
 
 fn gamma_correction(color: vec4<f32>) -> vec4<f32> {
@@ -462,4 +474,9 @@ fn fromLinear(color: vec4<f32>) -> vec4<f32> {
     let lower = color.rgb * 12.92;
 
     return vec4<f32>(mix(higher, lower, vec3<f32>(cutoff)), color.a);
+}
+
+
+fn blend(src: vec4<f32>, dst: vec4<f32>) -> vec4<f32> {
+    return src * src.a + dst * (1. - src.a);
 }

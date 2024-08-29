@@ -35,6 +35,8 @@ struct Settings {
     step_size:f32,
     ssao_radius: f32,
     ssao_bias: f32,
+    
+    background_color:vec4<f32>,
 
     ssao_kernel_size:u32
 }

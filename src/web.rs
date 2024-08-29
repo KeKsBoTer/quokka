@@ -173,7 +173,7 @@ pub async fn viewer_wasm(canvas_id: String) {
     loop {
         if let Some(reader) = rfd::AsyncFileDialog::new()
             .set_title("Select npy file")
-            .add_filter("numpy file", &["npy", "npz"])
+            .add_filter("numpy file", &["npy", "npz","nii"])
             .pick_file()
             .await
         {

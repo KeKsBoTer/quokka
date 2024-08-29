@@ -20,7 +20,7 @@ pub use web::*;
 
 use cgmath::Vector2;
 use winit::{
-    dpi::PhysicalSize, event::{DeviceEvent, ElementState, Event, WindowEvent}, event_loop::{ControlFlow, EventLoop}, keyboard::{KeyCode, PhysicalKey},  window::{Window, WindowBuilder}
+    dpi::{PhysicalPosition, PhysicalSize}, event::{DeviceEvent, ElementState, Event, WindowEvent}, event_loop::{ControlFlow, EventLoop}, keyboard::{KeyCode, PhysicalKey},  window::{Window, WindowBuilder}
 };
 
 use crate::{
@@ -71,8 +71,10 @@ impl WGPUContext {
             .await
             .unwrap();
 
+
         let required_features = wgpu::Features::default();
 
+        
         let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
@@ -104,8 +106,6 @@ pub struct WindowContext {
     camera: Camera<OrthographicProjection>,
     ui_renderer: ui_renderer::EguiWGPU,
     ui_visible: bool,
-
-    background_color: wgpu::Color,
 
     volume: VolumeGPU,
     renderer: VolumeRenderer,
@@ -203,6 +203,7 @@ impl WindowContext {
             gamma_correction: !surface_format.is_srgb(),
             render_volume:false,
             render_iso:true,
+            background_color: render_config.background_color,
             ..Default::default()
         };
 
@@ -236,7 +237,6 @@ impl WindowContext {
             controller,
             ui_renderer,
             ui_visible: true,
-            background_color: render_config.background_color,
             camera,
 
             volume: volumes_gpu,
@@ -360,7 +360,7 @@ impl WindowContext {
                         view: &view_rgb,
                         resolve_target: None,
                         ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(self.background_color),
+                            load: wgpu::LoadOp::Load,
                             store: wgpu::StoreOp::Store,
                         },
                     }),
@@ -447,7 +447,7 @@ pub async fn open_window(
     let mut last = Instant::now();
 
 
-
+    let mut last_touch_pos: PhysicalPosition<f64> = PhysicalPosition::new(0.0, 0.0);
     event_loop.run(move |event,target|
         
         match event {
@@ -499,6 +499,14 @@ pub async fn open_window(
                     _=>{}
                 }
             },
+            WindowEvent::Touch(t) => {
+                if t.phase == winit::event::TouchPhase::Moved{
+                    state.controller.process_mouse((t.location.x - last_touch_pos.x) as f32, (t.location.y - last_touch_pos.y) as f32);
+                    last_touch_pos = t.location;
+                }else if t.phase == winit::event::TouchPhase::Started{
+                    last_touch_pos = t.location;
+                }
+            }
             WindowEvent::DroppedFile(file) => {
                 if let Err(e) = state.load_file(file){
                     log::error!("failed to load file: {:?}", e)
