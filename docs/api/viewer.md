@@ -2,12 +2,12 @@
 
 Interactive Volume Rendering in an iPython environment.
 
-::: vape4d.viewer
+::: quokka.viewer
 
 ---
 
-::: vape4d.VolumeViewer
+::: quokka.VolumeViewer
 
 ---
 
-::: vape4d.ViewerSettings
+::: quokka.ViewerSettings

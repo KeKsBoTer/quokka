@@ -2,7 +2,7 @@ use camera::{Camera, OrthographicProjection};
 use cmap::LinearSegmentedColorMap;
 use controller::CameraController;
 use renderer::{RenderSettings, VolumeRenderer};
-use ssoa::SSAOTextures;
+use ssao::SSAOTextures;
 use std::{path::PathBuf, sync::Arc};
 use volume::VolumeGPU;
 
@@ -35,7 +35,7 @@ pub mod offline;
 #[cfg(feature = "python")]
 pub mod py;
 pub mod renderer;
-mod ssoa;
+mod ssao;
 mod ui;
 mod ui_renderer;
 mod viewer;
@@ -122,8 +122,8 @@ pub struct WindowContext {
     #[cfg(feature = "colormaps")]
     cmap_select_visible: bool,
 
-    ssao: ssoa::SSAO,
-    ssao_textures: ssoa::SSAOTextures,
+    ssao: ssao::SSAO,
+    ssao_textures: ssao::SSAOTextures,
 
     show_box:bool
 }
@@ -225,7 +225,7 @@ impl WindowContext {
 
         let cmap_gpu = ColorMapGPU::new(&cmap, device, queue, COLORMAP_RESOLUTION);
 
-        let ssao = ssoa::SSAO::new(device, render_format);
+        let ssao = ssao::SSAO::new(device, render_format);
         let ssao_textures = SSAOTextures::new(device, config.width, config.height);
 
         Ok(Self {

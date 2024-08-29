@@ -1,10 +1,10 @@
-site_name: vAPE4D
+site_name: quokka
 site_description: Interactive Visualization of 4D volumes (space+time).
 site_author: Simon Niedermayr
-site_url: https://keksboter.github.io/vape4d
+site_url: https://keksboter.github.io/quokka
 
-repo_url: https://github.com/keksboter/vape4d
-repo_name: keksboter/vape4d
+repo_url: https://github.com/keksboter/quokka
+repo_name: keksboter/quokka
 edit_uri: edit/master/docs/
 
 theme:

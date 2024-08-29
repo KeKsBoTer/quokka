@@ -13,7 +13,7 @@ use crate::{
 };
 
 #[pymodule]
-fn vape4d<'py>(m: &Bound<'py, PyModule>) -> PyResult<()> {
+fn quokka<'py>(m: &Bound<'py, PyModule>) -> PyResult<()> {
     #[pyfn(m)]
     fn render_video<'py>(
         py: Python<'py>,

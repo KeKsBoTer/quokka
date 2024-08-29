@@ -1,4 +1,4 @@
-# vAPE4D
+# quokka
 Real-time rendering for time-variying volumes (4D = 3D Space + Time) written in WebGPU and Rust.
 
 **The renderer runs in your brower or embeded in a Jupyter Notebook (e.g. inside vscode)**
@@ -39,14 +39,14 @@ $\hat{a_i} = 1-a_i^{\delta s}$
 ## Installation
 
 ```bash
-pip install vape4d
+pip install quokka
 ```
 
 ## Usage
 
 **Viewer** (jupyter notebook)
 ```python
-from vape4d import viewer
+from quokka import viewer
 import numpy as np
 from matplotlib import pyplot as plt
 
@@ -60,7 +60,7 @@ viewer(
 **Render Image**
 ```python
 import numpy as np
-from vape4d import diverging_alpha, render
+from quokka import diverging_alpha, render
 import matplotlib.pyplot as plt
 
 colormap = diverging_alpha(plt.get_cmap("magma"))

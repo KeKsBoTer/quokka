@@ -1,10 +1,10 @@
 [project]
-name = "vape4d"
+name = "quokka"
 version = "0.2.2"
 description = "Volume 4D Visualization"
 readme = "README.md"
 requires-python = ">=3.8"
-keywords = ["4D", "volume", "visualization", "vape4d"]
+keywords = ["4D", "volume", "visualization", "quokka"]
 authors = [{ name = "Simon Niedermayr" }]
 
 dependencies = ["numpy", "matplotlib", "seaborn", "cmasher", "cffi"]
@@ -13,8 +13,8 @@ dependencies = ["numpy", "matplotlib", "seaborn", "cmasher", "cffi"]
 ipython = ["ipython"]
 
 [project.urls]
-homepage = "https://keksboter.github.io/vape4d"
-repository = "https://github.com/KeKsBoTer/vape4d"
+homepage = "https://keksboter.github.io/quokka"
+repository = "https://github.com/KeKsBoTer/quokka"
 
 [build-system]
 requires = ["maturin>=1.0,<2.0"]
@@ -25,4 +25,4 @@ build-backend = "maturin"
 features = ["pyo3/extension-module", "python"]
 
 [project.gui-scripts]
-vape4d = "vape4d.vape4d:standalone"
+quokka = "quokka.quokka:standalone"

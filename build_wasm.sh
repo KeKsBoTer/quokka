@@ -8,5 +8,5 @@ cargo build \
     --out-dir public \
     --no-typescript \
     --target web \
-    target/wasm32-unknown-unknown/web-release/vape4d.wasm \
+    target/wasm32-unknown-unknown/web-release/quokka.wasm \
     

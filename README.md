@@ -1,23 +1,20 @@
-# vAPE - Interactive 4D volume visualization
+# Quokka - Interactive Volume visualization
 
-[![PyPI](https://img.shields.io/pypi/v/vape4d.svg)](https://pypi.org/project/vape4d/)
+[![PyPI](https://img.shields.io/pypi/v/quokka.svg)](https://pypi.org/project/quokka/)
 [![Docs](https://img.shields.io/badge/docs-mkdocs-blue)
-](https://keksboter.github.io/vape4d/docs/)
+](https://keksboter.github.io/quokka/docs/)
 
-[👉 Click to run the web app 👈](https://keksboter.github.io/vape4d)
+[👉 Click to run the web app 👈](https://keksboter.github.io/quokka)
 
-![Viewer screenshot](https://raw.githubusercontent.com/KeKsBoTer/vape4d/master/screenshot.png)
-
-[Burgers](https://en.wikipedia.org/wiki/Burgers%27_equation)            |  [Kuramoto–Sivashinsky](https://en.wikipedia.org/wiki/Kuramoto%E2%80%93Sivashinsky_equation)                              |  [Gray-Scott](https://groups.csail.mit.edu/mac/projects/amorphous/GrayScott/)
-:-------------------------:|:------------------------:|:-------------------------:
-![Burgers](https://raw.githubusercontent.com/KeKsBoTer/vape4d/master/references_3d/burgers_1.webp)  |![Kuramoto–Sivashinsky](https://raw.githubusercontent.com/KeKsBoTer/vape4d/master/references_3d/ks.webp)|![Gray Scott](https://raw.githubusercontent.com/KeKsBoTer/vape4d/master/references_3d/gray_scott.webp)|
-
+<!--![Viewer screenshot](https://raw.githubusercontent.com/KeKsBoTer/quokka/master/screenshot.png)-->
+![Viewer screenshot](images/screenshot_iso.png)
+![Viewer screenshot](images/screenshot_volume.png)
 
 ## Installation
 
 with pip
 ```
-pip install vape4d
+pip install quokka
 ```
 
 
@@ -25,7 +22,7 @@ pip install vape4d
 
 **Viewer** (jupyter notebook)
 ```python
-from vape4d import viewer
+from quokka import viewer
 import numpy as np
 from matplotlib import pyplot as plt
 
@@ -39,7 +36,7 @@ viewer(
 **Render Image**
 ```python
 import numpy as np
-from vape4d import diverging_alpha, render
+from quokka import diverging_alpha, render
 import matplotlib.pyplot as plt
 
 colormap = diverging_alpha(plt.get_cmap("magma"))
@@ -64,4 +61,4 @@ plt.show()
 
 1. Install python and `matplotlib`,`seaborn` and `cmasher`
 2. Run `python colormaps.py` to generate the colormaps
-3. Run the viewer with `cargo run --bin vape3d --features colormaps <volume_file>`
+3. Run the viewer with `cargo run --bin quokka --features colormaps <volume_file>`
