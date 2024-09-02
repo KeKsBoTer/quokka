@@ -15,7 +15,7 @@ use crate::cmap::COLORMAPS;
 pub(crate) fn ui(state: &mut WindowContext) {
     let ctx = state.ui_renderer.winit.egui_ctx();
     let with_animation = state.volume.volume.timesteps > 1;
-    egui::Window::new("Render Settings").show(ctx, |ui| {
+    egui::Window::new("Render Settings").fade_in(true).show(ctx, |ui| {
         egui::Grid::new("render_settings")
             .num_columns(2)
             .striped(true)
@@ -91,13 +91,18 @@ pub(crate) fn ui(state: &mut WindowContext) {
                 ui.add(egui::Slider::new(&mut state.camera.projection.znear, min_near..=max_near).clamp_to_range(true));
                 ui.end_row();
 
-                ui.label("Far Clip Plane");
-                ui.add(egui::Slider::new(&mut state.camera.projection.zfar, min_far..=max_far).clamp_to_range(true));
+                // ui.label("Far Clip Plane");
+                // ui.add(egui::Slider::new(&mut state.camera.projection.zfar, min_far..=max_far).clamp_to_range(true));
 
                 // workaround until clamp_to_range works with sliders again
 
                 state.camera.projection.znear = state.camera.projection.znear.clamp(min_near,max_near );
                 state.camera.projection.zfar = state.camera.projection.zfar.clamp(min_far,max_far);
+
+                if ui.button("reset").clicked(){
+
+    ctx.memory_mut(|m|m.reset_areas());
+                }
             });
         CollapsingHeader::new("Advanced").show_unindented(ui, |ui| {
             Grid::new("settings_advanced")

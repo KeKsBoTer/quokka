@@ -1,3 +1,4 @@
+use anyhow::Context;
 use camera::{Camera, OrthographicProjection};
 use cmap::LinearSegmentedColorMap;
 use controller::CameraController;

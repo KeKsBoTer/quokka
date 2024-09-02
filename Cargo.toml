@@ -41,6 +41,7 @@ pyo3 = { version = "0.21", features = ["extension-module"], optional = true }
 numpy = { version = "0.21", optional = true, features = ["half"] }
 
 nifti = { version = "0.16.0" }
+rayon = "1.10.0"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 pollster = { version = "0.3.0", features = ["macro"] }

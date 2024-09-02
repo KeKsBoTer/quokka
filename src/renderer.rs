@@ -317,6 +317,52 @@ pub struct RenderSettings {
     pub background_color:wgpu::Color,
 }
 
+impl std::hash::Hash for RenderSettings{
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.clipping_aabb.hash(state);
+        self.time.to_bits().hash(state);
+        self.step_size.to_bits().hash(state);
+        self.spatial_filter.hash(state);
+        self.temporal_filter.hash(state);
+        self.distance_scale.to_bits().hash(state);
+        self.vmin.map(|v|v.to_bits()).hash(state);
+        self.vmax.map(|v|v.to_bits()).hash(state);
+        self.gamma_correction.hash(state);
+        self.render_volume.hash(state);
+        self.render_iso.hash(state);
+        self.use_cube_surface_grad.hash(state);
+        self.iso_shininess.to_bits().hash(state);
+        self.iso_threshold.to_bits().hash(state);
+
+
+        self.iso_ambient_color.x.to_bits().hash(state);
+        self.iso_ambient_color.y.to_bits().hash(state);
+        self.iso_ambient_color.z.to_bits().hash(state);
+
+        self.iso_specular_color.x.to_bits().hash(state);
+        self.iso_specular_color.y.to_bits().hash(state);
+        self.iso_specular_color.z.to_bits().hash(state);
+
+        self.iso_light_color.x.to_bits().hash(state);
+        self.iso_light_color.y.to_bits().hash(state);
+        self.iso_light_color.z.to_bits().hash(state);
+        
+        self.iso_diffuse_color.x.to_bits().hash(state);
+        self.iso_diffuse_color.y.to_bits().hash(state);
+        self.iso_diffuse_color.z.to_bits().hash(state);
+        self.iso_diffuse_color.w.to_bits().hash(state);
+
+        self.ssao.hash(state);
+        self.ssao_radius.to_bits().hash(state);
+        self.ssao_bias.to_bits().hash(state);
+        self.ssao_kernel_size.hash(state);
+        self.background_color.r.to_bits().hash(state);
+        self.background_color.g.to_bits().hash(state);
+        self.background_color.b.to_bits().hash(state);
+        self.background_color.a.to_bits().hash(state);
+    }
+}
+
 impl Default for RenderSettings {
     fn default() -> Self {
         Self {

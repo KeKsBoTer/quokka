@@ -192,3 +192,27 @@ fn hessian_plane(p:Vector4<f32>)->Vector4<f32>{
     let l = p.truncate().magnitude();
     return p/l;
 }
+
+
+impl std::hash::Hash for OrthographicProjection{
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.znear.to_bits().hash(state);
+        self.zfar.to_bits().hash(state);
+        self.viewport.x.to_bits().hash(state);
+        self.viewport.y.to_bits().hash(state);
+    }
+}
+
+impl std::hash::Hash for OrthographicCamera{
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.position.x.to_bits().hash(state);
+        self.position.y.to_bits().hash(state);
+        self.position.z.to_bits().hash(state);
+        
+        self.rotation.s.to_bits().hash(state);
+        self.rotation.v.x.to_bits().hash(state);
+        self.rotation.v.y.to_bits().hash(state);
+        self.rotation.v.z.to_bits().hash(state);
+        self.projection.hash(state);
+    }
+}

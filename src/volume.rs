@@ -3,7 +3,9 @@ use cgmath::{BaseNum, EuclideanSpace, MetricSpace, Point3, Vector3, Zero};
 use half::f16;
 #[cfg(target_arch = "wasm32")]
 use instant::Instant;
-use nifti::{InMemNiftiObject, IntoNdArray, NiftiObject, NiftiVolume};
+use nifti::{
+     InMemNiftiObject, IntoNdArray,  NiftiObject, NiftiVolume
+};
 use npyz::{npz, Deserialize, NpyFile};
 use num_traits::Float;
 #[cfg(feature = "python")]
@@ -197,25 +199,31 @@ impl Volume {
         Self::read(array)
     }
 
-    pub fn load_nifti<'a, R>(reader: R) -> anyhow::Result<Vec<Self>>
+    fn load_nifti<'a,R>(reader: R) -> anyhow::Result<Vec<Self>>
     where
         R: Read + Seek,
     {
         let obj = InMemNiftiObject::from_reader(reader)?;
-        // use obj
         let volume = obj.into_volume();
         let shape = volume.dim().to_vec();
         let dim = volume.dimensionality();
         if dim != 3 {
             anyhow::bail!("unsupported dimensionality: {}", dim);
         }
-        log::debug!("dim: {:?}",volume.dim());
 
-        // Array::from_shape_vec()
         let data = volume.into_ndarray::<f32>()?;
 
-        let min_value = data.iter().fold(f32::MAX, |a, &b| a.min(b)) as f32;
-        let mut max_value = data.iter().fold(f32::MIN, |a, &b| a.max(b)) as f32;
+        let mut min_value = f32::MAX;
+        let mut max_value = f32::MIN;
+
+
+        let data_t = data.t();
+        let data_s = data_t.as_standard_layout().to_owned().map(|v| {
+            min_value = min_value.min(*v);
+            max_value = max_value.max(*v);
+            f16::from_f32(*v)
+        });
+
         if min_value == max_value {
             max_value = min_value + 1.0;
         }
@@ -231,15 +239,14 @@ impl Volume {
         };
         log::info!("volume shape is: {:?}, interpreted as [WxHxD]", shape);
 
+
         return Ok(vec![Self {
             timesteps: 1,
             resolution: Vector3::new(shape[2] as u32, shape[1] as u32, shape[0] as u32),
             aabb,
-            min_value,
-            max_value,
-            data: data.as_standard_layout().t().iter()
-                .map(|&v| f16::from_f32(v))
-                .collect(),
+            min_value: min_value as f32,
+            max_value: max_value as f32,
+            data: data_s.as_slice().unwrap().to_vec(),
         }]);
     }
 }
@@ -324,5 +331,17 @@ impl<F: Float + BaseNum> Aabb<F> {
             Point3::new(self.max.x, self.max.y, self.min.z),
             self.max,
         ]
+    }
+}
+
+impl std::hash::Hash for Aabb<f32> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.min.x.to_bits().hash(state);
+        self.min.y.to_bits().hash(state);
+        self.min.z.to_bits().hash(state);
+
+        self.max.x.to_bits().hash(state);
+        self.max.y.to_bits().hash(state);
+        self.max.z.to_bits().hash(state);
     }
 }
