@@ -662,6 +662,7 @@ use std::hash::Hash;
 /// Load or create a texture from a colormap
 /// If the texture is already loaded, return the texture id
 /// Otherwise, create a new texture and store it in the egui context
+#[cfg(feature = "colormaps")]
 fn load_or_create<C>(ui: &egui::Ui, cmap: C, n: u32) -> egui::TextureId
 where
     C: ColorMap + Hash,
