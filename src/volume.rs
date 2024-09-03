@@ -8,8 +8,6 @@ use ndarray::{Array4, ArrayBase, Axis, Data, Ix4, OwnedRepr};
 use nifti::{InMemNiftiObject, IntoNdArray, NiftiObject};
 use npyz::{npz, Deserialize, NpyFile};
 use num_traits::Float;
-#[cfg(feature = "python")]
-use numpy::ndarray::ArrayViewD;
 use std::io::{Read, Seek};
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
@@ -25,67 +23,8 @@ pub struct Volume {
 }
 
 impl Volume {
-    #[cfg(feature = "python")]
-    pub fn from_array(data: ArrayViewD<f16>) -> Self {
-        let shape = data.shape().to_vec();
-        let resolution = [shape[1] as u32, shape[2] as u32, shape[3] as u32];
-        let vec_data = data.to_slice().unwrap().to_vec();
-
-        let res_min = resolution.iter().min().unwrap();
-        let aabb = Aabb {
-            min: Point3::new(0.0, 0.0, 0.0),
-            max: Point3::new(
-                resolution[2] as f32 / *res_min as f32,
-                resolution[1] as f32 / *res_min as f32,
-                resolution[0] as f32 / *res_min as f32,
-            ),
-        };
-        let vmin = *vec_data.iter().min_by(|a, b| a.total_cmp(b)).unwrap();
-        let vmax = *vec_data.iter().max_by(|a, b| a.total_cmp(b)).unwrap();
-        Self {
-            timesteps: shape[0] as u32,
-            resolution: resolution.into(),
-            aabb,
-            min_value: vmin.to_f32(),
-            max_value: vmax.to_f32(),
-            data: vec_data,
-        }
-    }
-
-    pub fn timesteps(&self) -> usize {
-        self.data.shape()[0]
-    }
-
-    pub fn resolution(&self) -> Vector3<u32> {
-        Vector3::new(
-            self.data.shape()[1] as u32,
-            self.data.shape()[2] as u32,
-            self.data.shape()[3] as u32,
-        )
-    }
-
-    pub fn load<'a, R>(mut reader: R) -> anyhow::Result<Self>
-    where
-        R: Read + Seek,
-    {
-        let start = Instant::now();
-        let mut buffer = [0; 4];
-        reader.read_exact(&mut buffer)?;
-        let is_npz = buffer == *b"\x50\x4B\x03\x04";
-
-        reader.seek(std::io::SeekFrom::Start(344))?;
-        reader.read_exact(&mut buffer)?;
-        let is_nifti = buffer == *b"\x6E\x2B\x31\x00";
-        reader.seek(std::io::SeekFrom::Start(0))?;
-
-        let mut data = if is_nifti {
-            Self::load_nifti(reader)
-        } else if is_npz {
-            Self::load_npz(reader)
-        } else {
-            Self::load_npy(reader)
-        }?;
-
+    pub fn from_array( mut data: ArrayBase<OwnedRepr<f16>,IxDyn>) -> Result<Volume, anyhow::Error> {
+        
         let dim = data.shape().len();
         if dim != 3 && dim != 4 {
             // if we can squeeze the array, continue
@@ -116,7 +55,7 @@ impl Volume {
                 shape[1] as f32 / *res_min as f32,
             ),
         };
-        log::info!("volume shape is: {:?}, interpreted as [WxHxD]", shape);
+        log::info!("volume shape is: {:?}, interpreted as [TxWxHxD]", shape);
 
         let mut min_value = f32::MAX;
         let mut max_value = f32::MIN;
@@ -149,8 +88,45 @@ impl Volume {
             .unwrap(),
         };
 
-        log::info!("loaded volume in {:?}", start.elapsed());
         return Ok(volume);
+    }
+
+    pub fn timesteps(&self) -> usize {
+        self.data.shape()[0]
+    }
+
+    pub fn resolution(&self) -> Vector3<u32> {
+        Vector3::new(
+            self.data.shape()[1] as u32,
+            self.data.shape()[2] as u32,
+            self.data.shape()[3] as u32,
+        )
+    }
+
+    pub fn load<'a, R>(mut reader: R) -> anyhow::Result<Self>
+    where
+        R: Read + Seek,
+    {
+        let start = Instant::now();
+        let mut buffer = [0; 4];
+        reader.read_exact(&mut buffer)?;
+        let is_npz = buffer == *b"\x50\x4B\x03\x04";
+
+        reader.seek(std::io::SeekFrom::Start(344))?;
+        reader.read_exact(&mut buffer)?;
+        let is_nifti = buffer == *b"\x6E\x2B\x31\x00";
+        reader.seek(std::io::SeekFrom::Start(0))?;
+
+        let data = if is_nifti {
+            Self::load_nifti(reader)
+        } else if is_npz {
+            Self::load_npz(reader)
+        } else {
+            Self::load_npy(reader)
+        }?;
+        let volume = Self::from_array(data);
+        log::info!("loading volume took: {:?}", start.elapsed());
+        return volume;
     }
 
     fn load_npz<'a, R>(reader: R) -> anyhow::Result<ArrayBase<OwnedRepr<f16>, IxDyn>>
@@ -270,12 +246,14 @@ impl VolumeGPU {
     }
 }
 
+
 #[repr(C)]
 #[derive(Zeroable, Clone, Copy, Debug)]
 pub struct Aabb<F: Float + BaseNum> {
     pub min: Point3<F>,
     pub max: Point3<F>,
 }
+
 
 impl<F: Float + BaseNum> Aabb<F> {
     pub fn unit() -> Self {

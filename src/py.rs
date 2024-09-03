@@ -29,7 +29,7 @@ fn quokka<'py>(m: &Bound<'py, PyModule>) -> PyResult<()> {
         spatial_interpolation: Option<String>,
         temporal_interpolation: Option<String>,
     ) -> Bound<'py, PyArray4<u8>> {
-        let volume = Volume::from_array(volume.as_array());
+        let volume = Volume::from_array(volume.as_array().to_owned()).expect("cannot read array");
         let cmap = ListedColorMap::from_array(cmap.as_array());
         let img: Vec<ImageBuffer<Rgba<u8>, Vec<u8>>> = pollster::block_on(render_volume(
             vec![volume],
