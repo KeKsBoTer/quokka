@@ -2243,6 +2243,7 @@ dependencies = [
  "num-integer",
  "num-traits",
  "rawpointer",
+ "rayon",
 ]
 
 [[package]]
@@ -2946,6 +2947,7 @@ dependencies = [
  "include_dir",
  "instant",
  "log",
+ "ndarray",
  "nifti",
  "npyz",
  "num-traits",

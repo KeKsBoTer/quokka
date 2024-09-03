@@ -39,24 +39,23 @@ impl<P: Projection> Camera<P> {
         self.projection.projection_matrix()
     }
 
-    pub fn visible(&self,aabb: Aabb<f32>)->bool{
+    pub fn visible(&self, aabb: Aabb<f32>) -> bool {
         let planes = frustum_planes(self.view_matrix(), self.proj_matrix());
         let center = aabb.center();
         let radius = aabb.radius();
-        for p in planes{
+        for p in planes {
             let d = p.dot(center.to_homogeneous());
-            if d < -radius{
+            if d < -radius {
                 return false;
             }
         }
         return true;
     }
-    
+
     pub fn view_direction(&self) -> Vector3<f32> {
         let view_inv = self.view_matrix().invert().unwrap();
-        let dir = view_inv.transform_vector(Vector3::new(0.,0.,1.));
+        let dir = view_inv.transform_vector(Vector3::new(0., 0., 1.));
         return dir.normalize();
-
     }
 }
 
@@ -174,27 +173,25 @@ impl Projection for OrthographicProjection {
     }
 }
 
-
-fn frustum_planes(view:Matrix4<f32>,proj:Matrix4<f32>)->[Vector4<f32>;6]{
-    let a = (proj*view).transpose();
+fn frustum_planes(view: Matrix4<f32>, proj: Matrix4<f32>) -> [Vector4<f32>; 6] {
+    let a = (proj * view).transpose();
     [
-        hessian_plane(a[0]+a[3]),
-        hessian_plane(-a[0]+a[3]),
-        hessian_plane(a[1]+a[3]),
-        hessian_plane(-a[1]+a[3]),
-        hessian_plane(a[2]+a[3]),
-        hessian_plane(-a[2]+a[3]),
+        hessian_plane(a[0] + a[3]),
+        hessian_plane(-a[0] + a[3]),
+        hessian_plane(a[1] + a[3]),
+        hessian_plane(-a[1] + a[3]),
+        hessian_plane(a[2] + a[3]),
+        hessian_plane(-a[2] + a[3]),
     ]
 }
 
-fn hessian_plane(p:Vector4<f32>)->Vector4<f32>{
+fn hessian_plane(p: Vector4<f32>) -> Vector4<f32> {
     // normal length
     let l = p.truncate().magnitude();
-    return p/l;
+    return p / l;
 }
 
-
-impl std::hash::Hash for OrthographicProjection{
+impl std::hash::Hash for OrthographicProjection {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.znear.to_bits().hash(state);
         self.zfar.to_bits().hash(state);
@@ -203,12 +200,12 @@ impl std::hash::Hash for OrthographicProjection{
     }
 }
 
-impl std::hash::Hash for OrthographicCamera{
+impl std::hash::Hash for OrthographicCamera {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.position.x.to_bits().hash(state);
         self.position.y.to_bits().hash(state);
         self.position.z.to_bits().hash(state);
-        
+
         self.rotation.s.to_bits().hash(state);
         self.rotation.v.x.to_bits().hash(state);
         self.rotation.v.y.to_bits().hash(state);

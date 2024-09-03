@@ -1,11 +1,11 @@
+use ::ndarray::{Array, IxDyn};
 use bytemuck::Zeroable;
-use cgmath::{BaseNum, EuclideanSpace, MetricSpace, Point3, Vector3, Zero};
+use cgmath::{BaseNum, EuclideanSpace, MetricSpace, Point3, Vector3};
 use half::f16;
 #[cfg(target_arch = "wasm32")]
 use instant::Instant;
-use nifti::{
-     InMemNiftiObject, IntoNdArray,  NiftiObject, NiftiVolume
-};
+use ndarray::{Array4, ArrayBase, Axis, Data, Ix4, OwnedRepr};
+use nifti::{InMemNiftiObject, IntoNdArray, NiftiObject};
 use npyz::{npz, Deserialize, NpyFile};
 use num_traits::Float;
 #[cfg(feature = "python")]
@@ -16,12 +16,12 @@ use std::time::Instant;
 use wgpu::util::{DeviceExt, TextureDataOrder};
 
 pub struct Volume {
-    pub timesteps: u32,
-    pub resolution: Vector3<u32>,
+    // pub timesteps: u32,
+    // pub resolution: Vector3<u32>,
     pub aabb: Aabb<f32>,
     pub min_value: f32,
     pub max_value: f32,
-    data: Vec<f16>,
+    data: ndarray::Array4<f16>,
 }
 
 impl Volume {
@@ -52,113 +52,18 @@ impl Volume {
         }
     }
 
-    pub fn load_npy<'a, R>(reader: R) -> anyhow::Result<Vec<Self>>
-    where
-        R: Read + Seek,
-    {
-        let array = NpyFile::new(reader)?;
-        Self::read(array)
+    pub fn timesteps(&self) -> usize {
+        self.data.shape()[0]
     }
 
-    pub fn read_dyn<'a, R, P>(array: NpyFile<R>) -> anyhow::Result<Vec<Self>>
-    where
-        R: Read,
-        P: Into<f64> + Deserialize,
-    {
-        let start = Instant::now();
-        let time_dim = 0;
-        let channel_dim = 1;
-        let timesteps = array.shape()[time_dim] as usize;
-        let channels = array.shape()[channel_dim] as usize;
-        log::debug!("size: {:?}", array.shape());
-        if array.shape().len() != 5 {
-            anyhow::bail!("unsupported shape: {:?}", array.shape());
-        }
-        let resolution = [
-            array.shape()[2] as u32,
-            array.shape()[3] as u32,
-            array.shape()[4] as u32,
-        ];
-        let numel = resolution.iter().product::<u32>() as usize;
-
-        let strides = array.strides().to_vec();
-        let mut volumes: Vec<Vec<f16>> = vec![vec![f16::zero(); numel * timesteps]; channels];
-
-        let mut min_value = f32::MAX;
-        let mut max_value = f32::MIN;
-        for (i, v) in array.data::<P>()?.enumerate() {
-            let v64: f64 = v.unwrap().into();
-            let v32: f32 = v64 as f32;
-            let v = f16::from_f32(v32);
-            if v32 > max_value {
-                max_value = v32;
-            }
-            if v32 < min_value {
-                min_value = v32;
-            }
-
-            let t = i / strides[0] as usize;
-            let c = (i - strides[0] as usize * t) / strides[1] as usize;
-            let idx = t * numel + (i - strides[0] as usize * t - strides[1] as usize * c);
-
-            volumes[c][idx] = v;
-        }
-
-        if min_value == max_value {
-            max_value = min_value + 1.0;
-        }
-        let res_min = resolution.iter().min().unwrap();
-
-        let aabb = Aabb {
-            min: Point3::new(0.0, 0.0, 0.0),
-            max: Point3::new(
-                resolution[2] as f32 / *res_min as f32,
-                resolution[1] as f32 / *res_min as f32,
-                resolution[0] as f32 / *res_min as f32,
-            ),
-        };
-
-        let results = (0..channels as usize)
-            .map(|c| Self {
-                timesteps: timesteps as u32,
-                resolution: resolution.into(),
-                aabb,
-                max_value,
-                min_value,
-                data: volumes[c].clone(),
-            })
-            .collect();
-        log::info!("read volume in {:?}", start.elapsed());
-        Ok(results)
+    pub fn resolution(&self) -> Vector3<u32> {
+        Vector3::new(
+            self.data.shape()[1] as u32,
+            self.data.shape()[2] as u32,
+            self.data.shape()[3] as u32,
+        )
     }
 
-    pub fn read<'a, R>(array: NpyFile<R>) -> anyhow::Result<Vec<Self>>
-    where
-        R: Read,
-    {
-        match array.dtype() {
-            npyz::DType::Plain(d) => match d.type_char() {
-                npyz::TypeChar::Float => match d.num_bytes().unwrap() {
-                    2 => Self::read_dyn::<_, f16>(array),
-                    4 => Self::read_dyn::<_, f32>(array),
-                    8 => Self::read_dyn::<_, f64>(array),
-                    _ => anyhow::bail!("unsupported type {:}", d),
-                },
-                npyz::TypeChar::Uint => match d.num_bytes().unwrap() {
-                    1 => Self::read_dyn::<_, u8>(array),
-                    2 => Self::read_dyn::<_, u16>(array),
-                    _ => anyhow::bail!("unsupported type {:}", d),
-                },
-                npyz::TypeChar::Int => match d.num_bytes().unwrap() {
-                    1 => Self::read_dyn::<_, i8>(array),
-                    2 => Self::read_dyn::<_, i16>(array),
-                    _ => anyhow::bail!("unsupported type {:}", d),
-                },
-                _ => anyhow::bail!("unsupported type {:}", d),
-            },
-            d => anyhow::bail!("unsupported type {:}", d.descr()),
-        }
-    }
     pub fn load<'a, R>(mut reader: R) -> anyhow::Result<Self>
     where
         R: Read + Seek,
@@ -173,19 +78,82 @@ impl Volume {
         let is_nifti = buffer == *b"\x6E\x2B\x31\x00";
         reader.seek(std::io::SeekFrom::Start(0))?;
 
-        let mut volume = if is_nifti {
+        let mut data = if is_nifti {
             Self::load_nifti(reader)
         } else if is_npz {
             Self::load_npz(reader)
         } else {
             Self::load_npy(reader)
         }?;
+
+        let dim = data.shape().len();
+        if dim != 3 && dim != 4 {
+            // if we can squeeze the array, continue
+            // otherwise, bail
+            data = squeeze(data);
+            let new_dim = data.shape().len();
+            if new_dim != 3 && new_dim != 4 {
+                anyhow::bail!("unsupported shape: {:?}", data.shape());
+            }
+        }
+
+        // add a time axis if not present
+        if data.shape().len() == 3 {
+            data = data.insert_axis(ndarray::Axis(0));
+        }
+
+        let data = data.as_standard_layout();
+
+        let shape = data.shape();
+
+        let res_min = shape.iter().skip(1).min().unwrap();
+
+        let aabb = Aabb {
+            min: Point3::new(0.0, 0.0, 0.0),
+            max: Point3::new(
+                shape[3] as f32 / *res_min as f32,
+                shape[2] as f32 / *res_min as f32,
+                shape[1] as f32 / *res_min as f32,
+            ),
+        };
+        log::info!("volume shape is: {:?}, interpreted as [WxHxD]", shape);
+
+        let mut min_value = f32::MAX;
+        let mut max_value = f32::MIN;
+
+        let array_f16 = data.map(|v| {
+            let v_f: f64 = (*v).clone().into();
+            min_value = min_value.min(v_f as f32);
+            max_value = max_value.max(v_f as f32);
+            f16::from_f64(v_f)
+        });
+
+        if min_value == max_value {
+            log::warn!(
+                "min value({}) == max value({}), setting max to min + 1",
+                min_value,
+                max_value
+            );
+            max_value = min_value + 1.0;
+        }
+
+        log::debug!("a shape: {:?}", shape);
+        let volume = Self {
+            aabb,
+            min_value: min_value as f32,
+            max_value: max_value as f32,
+            data: Array4::from_shape_vec(
+                Ix4(shape[0], shape[1], shape[2], shape[3]),
+                array_f16.as_slice().unwrap().to_vec(),
+            )
+            .unwrap(),
+        };
+
         log::info!("loaded volume in {:?}", start.elapsed());
-        assert_eq!(volume.len(), 1);
-        return Ok(volume.pop().unwrap());
+        return Ok(volume);
     }
 
-    pub fn load_npz<'a, R>(reader: R) -> anyhow::Result<Vec<Self>>
+    fn load_npz<'a, R>(reader: R) -> anyhow::Result<ArrayBase<OwnedRepr<f16>, IxDyn>>
     where
         R: Read + Seek,
     {
@@ -196,58 +164,67 @@ impl Volume {
             .ok_or(anyhow::format_err!("no array present"))?
             .to_string();
         let array = reader.by_name(arr_name.as_str())?.unwrap();
-        Self::read(array)
+        Self::read_npy(array)
     }
 
-    fn load_nifti<'a,R>(reader: R) -> anyhow::Result<Vec<Self>>
+    fn load_npy<'a, R>(reader: R) -> anyhow::Result<ArrayBase<OwnedRepr<f16>, IxDyn>>
+    where
+        R: Read + Seek,
+    {
+        let array = NpyFile::new(reader)?;
+        Self::read_npy(array)
+    }
+
+    fn read_npy_dyn<'a, R, P>(
+        npy_file: NpyFile<R>,
+    ) -> anyhow::Result<ArrayBase<OwnedRepr<f16>, IxDyn>>
+    where
+        R: Read,
+        P: Into<f64> + Deserialize + Clone,
+    {
+        let shape: Vec<usize> = npy_file.shape().iter().map(|v| *v as usize).collect();
+        let data = npy_file.into_vec::<P>()?;
+        let array_s = Array::from_shape_vec(IxDyn(&shape), data)?;
+        return Ok(array_s.map(|v| f16::from_f64((*v).clone().into())));
+    }
+
+    fn read_npy<'a, R>(array: NpyFile<R>) -> anyhow::Result<ArrayBase<OwnedRepr<f16>, IxDyn>>
+    where
+        R: Read,
+    {
+        match array.dtype() {
+            npyz::DType::Plain(d) => match d.type_char() {
+                npyz::TypeChar::Float => match d.num_bytes().unwrap() {
+                    2 => Self::read_npy_dyn::<_, f16>(array),
+                    4 => Self::read_npy_dyn::<_, f32>(array),
+                    8 => Self::read_npy_dyn::<_, f64>(array),
+                    _ => anyhow::bail!("unsupported type {:}", d),
+                },
+                npyz::TypeChar::Uint => match d.num_bytes().unwrap() {
+                    1 => Self::read_npy_dyn::<_, u8>(array),
+                    2 => Self::read_npy_dyn::<_, u16>(array),
+                    _ => anyhow::bail!("unsupported type {:}", d),
+                },
+                npyz::TypeChar::Int => match d.num_bytes().unwrap() {
+                    1 => Self::read_npy_dyn::<_, i8>(array),
+                    2 => Self::read_npy_dyn::<_, i16>(array),
+                    _ => anyhow::bail!("unsupported type {:}", d),
+                },
+                _ => anyhow::bail!("unsupported type {:}", d),
+            },
+            d => anyhow::bail!("unsupported type {:}", d.descr()),
+        }
+    }
+
+    fn load_nifti<'a, R>(reader: R) -> anyhow::Result<ArrayBase<OwnedRepr<f16>, IxDyn>>
     where
         R: Read + Seek,
     {
         let obj = InMemNiftiObject::from_reader(reader)?;
         let volume = obj.into_volume();
-        let shape = volume.dim().to_vec();
-        let dim = volume.dimensionality();
-        if dim != 3 {
-            anyhow::bail!("unsupported dimensionality: {}", dim);
-        }
 
         let data = volume.into_ndarray::<f32>()?;
-
-        let mut min_value = f32::MAX;
-        let mut max_value = f32::MIN;
-
-
-        let data_t = data.t();
-        let data_s = data_t.as_standard_layout().to_owned().map(|v| {
-            min_value = min_value.min(*v);
-            max_value = max_value.max(*v);
-            f16::from_f32(*v)
-        });
-
-        if min_value == max_value {
-            max_value = min_value + 1.0;
-        }
-        let res_min = shape.iter().min().unwrap();
-
-        let aabb = Aabb {
-            min: Point3::new(0.0, 0.0, 0.0),
-            max: Point3::new(
-                shape[0] as f32 / *res_min as f32,
-                shape[1] as f32 / *res_min as f32,
-                shape[2] as f32 / *res_min as f32,
-            ),
-        };
-        log::info!("volume shape is: {:?}, interpreted as [WxHxD]", shape);
-
-
-        return Ok(vec![Self {
-            timesteps: 1,
-            resolution: Vector3::new(shape[2] as u32, shape[1] as u32, shape[0] as u32),
-            aabb,
-            min_value: min_value as f32,
-            max_value: max_value as f32,
-            data: data_s.as_slice().unwrap().to_vec(),
-        }]);
+        return Ok(data.map(|v| f16::from_f64((*v).clone().into())));
     }
 }
 
@@ -258,16 +235,18 @@ pub struct VolumeGPU {
 
 impl VolumeGPU {
     pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, volume: Volume) -> Self {
-        let textures = (0..volume.timesteps)
+        let timesteps = volume.timesteps();
+        let resolution = volume.resolution();
+        let textures = (0..timesteps)
             .map(|i| {
                 device.create_texture_with_data(
                     queue,
                     &wgpu::TextureDescriptor {
                         label: Some(format!("volume texture {}", i).as_str()),
                         size: wgpu::Extent3d {
-                            width: volume.resolution[2],
-                            height: volume.resolution[1],
-                            depth_or_array_layers: volume.resolution[0],
+                            width: resolution[2],
+                            height: resolution[1],
+                            depth_or_array_layers: resolution[0],
                         },
                         mip_level_count: 1,
                         sample_count: 1,
@@ -278,14 +257,11 @@ impl VolumeGPU {
                     },
                     TextureDataOrder::LayerMajor,
                     bytemuck::cast_slice(
-                        &volume.data[(i
-                            * volume.resolution[0]
-                            * volume.resolution[1]
-                            * volume.resolution[2]) as usize
-                            ..((i + 1)
-                                * volume.resolution[0]
-                                * volume.resolution[1]
-                                * volume.resolution[2]) as usize],
+                        &volume
+                            .data
+                            .index_axis(Axis(0), i as usize)
+                            .as_slice()
+                            .unwrap(),
                     ),
                 )
             })
@@ -344,4 +320,18 @@ impl std::hash::Hash for Aabb<f32> {
         self.max.y.to_bits().hash(state);
         self.max.z.to_bits().hash(state);
     }
+}
+
+/// Squeeze out all dimensions of size 1
+pub fn squeeze<A, S>(array: ArrayBase<S, IxDyn>) -> ArrayBase<S, IxDyn>
+where
+    S: Data<Elem = A>,
+{
+    let mut out = array;
+    for axis in (0..out.shape().len()).rev() {
+        if out.shape()[axis] == 1 && out.shape().len() > 1 {
+            out = out.remove_axis(Axis(axis));
+        }
+    }
+    out
 }

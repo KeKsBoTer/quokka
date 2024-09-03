@@ -42,7 +42,7 @@ impl VolumeRenderer {
                 targets: &[
                     Some(wgpu::ColorTargetState {
                         format: color_format,
-                        blend: None,//Some(wgpu::BlendState::REPLACE),
+                        blend: None, //Some(wgpu::BlendState::REPLACE),
                         write_mask: wgpu::ColorWrites::ALL,
                     }),
                     Some(wgpu::ColorTargetState {
@@ -112,7 +112,7 @@ impl VolumeRenderer {
             usage: wgpu::BufferUsages::UNIFORM,
         });
 
-        let step = ((volume.volume.timesteps - 1) as f32 * render_settings.time) as usize;
+        let step = ((volume.volume.timesteps() - 1) as f32 * render_settings.time) as usize;
         // TODO maybe create all bindgroups once and not on the fly per frame
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("volume renderer bind group"),
@@ -127,7 +127,7 @@ impl VolumeRenderer {
                 wgpu::BindGroupEntry {
                     binding: 1,
                     resource: wgpu::BindingResource::TextureView(
-                        &volume.textures[(step + 1) % volume.volume.timesteps as usize]
+                        &volume.textures[(step + 1) % volume.volume.timesteps() as usize]
                             .create_view(&wgpu::TextureViewDescriptor::default()),
                     ),
                 },
@@ -312,12 +312,12 @@ pub struct RenderSettings {
     pub ssao: bool,
     pub ssao_radius: f32,
     pub ssao_bias: f32,
-    pub ssao_kernel_size:u32,
+    pub ssao_kernel_size: u32,
 
-    pub background_color:wgpu::Color,
+    pub background_color: wgpu::Color,
 }
 
-impl std::hash::Hash for RenderSettings{
+impl std::hash::Hash for RenderSettings {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.clipping_aabb.hash(state);
         self.time.to_bits().hash(state);
@@ -325,15 +325,14 @@ impl std::hash::Hash for RenderSettings{
         self.spatial_filter.hash(state);
         self.temporal_filter.hash(state);
         self.distance_scale.to_bits().hash(state);
-        self.vmin.map(|v|v.to_bits()).hash(state);
-        self.vmax.map(|v|v.to_bits()).hash(state);
+        self.vmin.map(|v| v.to_bits()).hash(state);
+        self.vmax.map(|v| v.to_bits()).hash(state);
         self.gamma_correction.hash(state);
         self.render_volume.hash(state);
         self.render_iso.hash(state);
         self.use_cube_surface_grad.hash(state);
         self.iso_shininess.to_bits().hash(state);
         self.iso_threshold.to_bits().hash(state);
-
 
         self.iso_ambient_color.x.to_bits().hash(state);
         self.iso_ambient_color.y.to_bits().hash(state);
@@ -346,7 +345,7 @@ impl std::hash::Hash for RenderSettings{
         self.iso_light_color.x.to_bits().hash(state);
         self.iso_light_color.y.to_bits().hash(state);
         self.iso_light_color.z.to_bits().hash(state);
-        
+
         self.iso_diffuse_color.x.to_bits().hash(state);
         self.iso_diffuse_color.y.to_bits().hash(state);
         self.iso_diffuse_color.z.to_bits().hash(state);
@@ -387,8 +386,8 @@ impl Default for RenderSettings {
             ssao: true,
             ssao_radius: 0.4,
             ssao_bias: 0.02,
-            ssao_kernel_size:64,
-            background_color:wgpu::Color::BLACK,
+            ssao_kernel_size: 64,
+            background_color: wgpu::Color::BLACK,
         }
     }
 }
@@ -404,7 +403,7 @@ pub struct RenderSettingsUniform {
     time: f32,
     time_steps: u32,
     temporal_filter: u32,
-    spatial_filter:u32,
+    spatial_filter: u32,
 
     distance_scale: f32,
     vmin: f32,
@@ -428,7 +427,7 @@ pub struct RenderSettingsUniform {
 
     background_color: Vector4<f32>,
 
-    ssao_kernel_size:u32,
+    ssao_kernel_size: u32,
     _pad: [u32; 3],
 }
 impl RenderSettingsUniform {
@@ -439,7 +438,7 @@ impl RenderSettingsUniform {
             volume_aabb_min: volume_aabb.min.to_vec().extend(0.),
             volume_aabb_max: volume_aabb.max.to_vec().extend(0.),
             time: settings.time,
-            time_steps: volume.timesteps as u32,
+            time_steps: volume.timesteps() as u32,
             clipping_min: settings
                 .clipping_aabb
                 .map(|bb| bb.min.to_vec().extend(0.))
@@ -450,7 +449,7 @@ impl RenderSettingsUniform {
                 .unwrap_or(RenderSettingsUniform::default().clipping_max),
             step_size: settings.step_size,
             temporal_filter: settings.temporal_filter as u32,
-            spatial_filter:settings.spatial_filter as u32,
+            spatial_filter: settings.spatial_filter as u32,
             distance_scale: settings.distance_scale,
             vmin: settings.vmin.unwrap_or(volume.min_value),
             vmax: settings.vmax.unwrap_or(volume.max_value),
@@ -466,8 +465,8 @@ impl RenderSettingsUniform {
             iso_diffuse_color: settings.iso_diffuse_color,
             ssao_radius: settings.ssao_radius,
             ssao_bias: settings.ssao_bias,
-            ssao_kernel_size:settings.ssao_kernel_size,
-            background_color:Vector4::new(
+            ssao_kernel_size: settings.ssao_kernel_size,
+            background_color: Vector4::new(
                 settings.background_color.r as f32,
                 settings.background_color.g as f32,
                 settings.background_color.b as f32,
@@ -489,7 +488,7 @@ impl Default for RenderSettingsUniform {
             time_steps: 1,
             step_size: 0.01,
             temporal_filter: wgpu::FilterMode::Linear as u32,
-            spatial_filter:wgpu::FilterMode::Nearest as u32,
+            spatial_filter: wgpu::FilterMode::Nearest as u32,
             distance_scale: 1.,
             vmin: 0.,
             vmax: 1.,
@@ -507,8 +506,8 @@ impl Default for RenderSettingsUniform {
 
             ssao_radius: 0.4,
             ssao_bias: 0.02,
-            ssao_kernel_size:64,
-            background_color:Vector4::new(0.,0.,0.,1.),
+            ssao_kernel_size: 64,
+            background_color: Vector4::new(0., 0., 0., 1.),
             _pad: [0; 3],
         }
     }

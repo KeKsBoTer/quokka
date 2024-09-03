@@ -1,11 +1,16 @@
-use anyhow::Context;
 use camera::{Camera, OrthographicProjection};
 use cmap::LinearSegmentedColorMap;
 use controller::CameraController;
+use egui::FullOutput;
 use image::ImageReader;
 use renderer::{RenderSettings, VolumeRenderer};
 use ssao::SSAOTextures;
-use std::{io::Cursor, path::PathBuf, sync::Arc};
+use std::{
+    hash::{DefaultHasher, Hash, Hasher},
+    io::Cursor,
+    path::PathBuf,
+    sync::Arc,
+};
 use volume::VolumeGPU;
 
 #[cfg(target_arch = "wasm32")]
@@ -22,7 +27,11 @@ pub use web::*;
 
 use cgmath::Vector2;
 use winit::{
-    dpi::{PhysicalPosition, PhysicalSize}, event::{DeviceEvent, ElementState, Event, WindowEvent}, event_loop::{ControlFlow, EventLoop}, keyboard::{KeyCode, PhysicalKey},  window::{Window, WindowBuilder}
+    dpi::{PhysicalPosition, PhysicalSize},
+    event::{DeviceEvent, ElementState, Event, WindowEvent},
+    event_loop::{ControlFlow, EventLoop},
+    keyboard::{KeyCode, PhysicalKey},
+    window::{Window, WindowBuilder},
 };
 
 use crate::{
@@ -70,10 +79,8 @@ impl WGPUContext {
             .await
             .unwrap();
 
-
         let required_features = wgpu::Features::default();
 
-        
         let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
@@ -124,7 +131,9 @@ pub struct WindowContext {
     ssao: ssao::SSAO,
     ssao_textures: ssao::SSAOTextures,
 
-    show_box:bool
+    show_box: bool,
+
+    last_state_hash: u64,
 }
 
 impl WindowContext {
@@ -200,8 +209,8 @@ impl WindowContext {
             vmin: render_config.vmin,
             vmax: render_config.vmax,
             gamma_correction: !surface_format.is_srgb(),
-            render_volume:false,
-            render_iso:true,
+            render_volume: false,
+            render_iso: true,
             background_color: render_config.background_color,
             ..Default::default()
         };
@@ -252,7 +261,8 @@ impl WindowContext {
             cmap_select_visible: render_config.show_cmap_select,
             ssao,
             ssao_textures,
-            show_box:false
+            show_box: false,
+            last_state_hash: 0,
         })
     }
 
@@ -288,20 +298,44 @@ impl WindowContext {
         }
     }
 
-    fn update(&mut self, dt: Duration) {
+    /// returns whether redraw is required
+    fn update(&mut self, dt: Duration) -> bool {
         let old_camera = self.camera.clone();
         self.controller.update_camera(&mut self.camera, dt);
-        if !self.camera.visible(self.volume.volume.aabb){
+        if !self.camera.visible(self.volume.volume.aabb) {
             self.camera = old_camera;
         }
 
-        if self.playing && self.volume.volume.timesteps > 1 {
+        if self.playing && self.volume.volume.timesteps() > 1 {
             self.render_settings.time += dt.as_secs_f32() / self.animation_duration.as_secs_f32();
             self.render_settings.time = self.render_settings.time.fract();
         }
+
+        let mut hasher = DefaultHasher::new();
+        self.camera.hash(&mut hasher);
+        self.render_settings.hash(&mut hasher);
+        let hash = hasher.finish();
+
+        let request_redraw = self.last_state_hash != hash;
+        self.last_state_hash = hash;
+        return request_redraw;
     }
 
-    fn render(&mut self,window:Arc<Window>) -> Result<(), wgpu::SurfaceError> {
+    /// returns whether redraw is required
+    fn ui(&mut self) -> (bool, egui::FullOutput) {
+        self.ui_renderer.begin_frame(&self.window);
+        let request_redraw = ui::ui(self);
+
+        let shapes = self.ui_renderer.end_frame(&self.window);
+
+        return (request_redraw, shapes);
+    }
+
+    fn render(
+        &mut self,
+        window: Arc<Window>,
+        shapes: Option<FullOutput>,
+    ) -> Result<(), wgpu::SurfaceError> {
         let window_size = self.window.inner_size();
         if window_size.width != self.config.width || window_size.height != self.config.height {
             self.resize(window_size, None);
@@ -322,12 +356,8 @@ impl WindowContext {
                     label: Some("render command encoder"),
                 });
 
-        let ui_state = if self.ui_visible {
-            self.ui_renderer.begin_frame(&self.window);
-            ui::ui(self);
-
-            let shapes = self.ui_renderer.end_frame(&self.window);
-            Some(self.ui_renderer.prepare(
+        let ui_state = shapes.map(|shapes| {
+            self.ui_renderer.prepare(
                 PhysicalSize {
                     width: output.texture.size().width,
                     height: output.texture.size().height,
@@ -337,10 +367,8 @@ impl WindowContext {
                 &self.wgpu_context.queue,
                 &mut encoder,
                 shapes,
-            ))
-        } else {
-            None
-        };
+            )
+        });
 
         let camera = self.camera.clone();
         let frame_data = self.renderer.prepare(
@@ -384,7 +412,7 @@ impl WindowContext {
                 &self.ssao_textures,
                 &self.camera,
                 &view_rgb,
-                &frame_data
+                &frame_data,
             );
         }
 
@@ -427,34 +455,40 @@ pub async fn open_window(
     let version = env!("CARGO_PKG_VERSION");
     let name = env!("CARGO_PKG_NAME");
 
-    let icon = ImageReader::new(Cursor::new(include_bytes!("../public/icon.png"))).with_guessed_format().unwrap().decode().unwrap().resize(64, 64, image::imageops::FilterType::Lanczos3);
+    let icon = ImageReader::new(Cursor::new(include_bytes!("../public/icon.png")))
+        .with_guessed_format()
+        .unwrap()
+        .decode()
+        .unwrap()
+        .resize(64, 64, image::imageops::FilterType::Lanczos3);
     let icon_width = icon.width();
     let icon_height = icon.height();
 
     let window = window_builder
         .with_title(format!("{name} {version}"))
-        .with_window_icon(Some(winit::window::Icon::from_rgba(
-            icon.into_rgba8().into_vec(),icon_width,icon_height).unwrap()))
+        .with_window_icon(Some(
+            winit::window::Icon::from_rgba(icon.into_rgba8().into_vec(), icon_width, icon_height)
+                .unwrap(),
+        ))
         .build(&event_loop)
         .unwrap();
 
-        let min_wait = window.current_monitor().map(|m|{
+    let min_wait = window
+        .current_monitor()
+        .map(|m| {
             let hz = m.refresh_rate_millihertz().unwrap_or(60_000);
-            Duration::from_millis(1000000/hz as u64)
-        }).unwrap_or(Duration::from_millis(17));
-    
+            Duration::from_millis(1000000 / hz as u64)
+        })
+        .unwrap_or(Duration::from_millis(17));
 
     let mut state = WindowContext::new(window, volume, cmap, &config)
         .await
         .unwrap();
 
-
     let mut last = Instant::now();
 
-
     let mut last_touch_pos: PhysicalPosition<f64> = PhysicalPosition::new(0.0, 0.0);
-    event_loop.run(move |event,target|
-        
+    event_loop.run(move |event,target|{
         match event {
             Event::NewEvents(e) =>  match e{
                 winit::event::StartCause::ResumeTimeReached { .. }=>{
@@ -465,7 +499,8 @@ pub async fn open_window(
         Event::WindowEvent {
             ref event,
             window_id,
-        } if window_id == state.window.id() && !state.ui_renderer.on_event(&state.window,event) => match event {
+        } if window_id == state.window.id() && !state.ui_renderer.on_event(&state.window,event) =>{
+             match event {
             WindowEvent::Resized(physical_size) => {
                 state.resize(*physical_size, None);
             }
@@ -522,31 +557,36 @@ pub async fn open_window(
                     // make sure the next redraw is called with a small delay
                     target.set_control_flow(ControlFlow::wait_duration(min_wait));
                 }
-                
                 let now = Instant::now();
                 let dt = now-last;
                 last = now;
-                state.update(dt);
-    
-                match state.render(state.window.clone()) {
-                    Ok(_) => {}
-                    // Reconfigure the surface if lost
-                    Err(wgpu::SurfaceError::Lost) =>{
-                        log::error!("lost surface!");
-                         state.resize(state.window.inner_size(), None)
+                let request_redraw = state.update(dt);
 
-                        },
-                    // The system is out of memory, we should probably quit
-                    Err(wgpu::SurfaceError::OutOfMemory) =>target.exit(),
-                    // All other errors (Outdated, Timeout) should be resolved by the next frame
-                    Err(e) => println!("error: {:?}", e),
+                let (redraw_ui,shapes) = state.ui();
+
+                // check whether we need to redraw
+                if request_redraw || redraw_ui{
+                    match state.render(state.window.clone(),state.ui_visible.then_some(shapes)) {
+                        Ok(_) => {}
+                        // Reconfigure the surface if lost
+                        Err(wgpu::SurfaceError::Lost) =>{
+                            log::error!("lost surface!");
+                            state.resize(state.window.inner_size(), None)
+
+                            },
+                        // The system is out of memory, we should probably quit
+                        Err(wgpu::SurfaceError::OutOfMemory) =>target.exit(),
+                        // All other errors (Outdated, Timeout) should be resolved by the next frame
+                        Err(e) => println!("error: {:?}", e),
+                    }
                 }
                 if config.no_vsync{
                     state.window.request_redraw();
                 }
+
             }
             _ => {}
-        },
+        }},
         Event::DeviceEvent {
             event: DeviceEvent::MouseMotion{ delta, },
             .. // We're not using device_id currently
@@ -566,6 +606,6 @@ pub async fn open_window(
             }
         }
         _ => {},
-    }).unwrap();
+}}).unwrap();
     log::info!("exit!");
 }

@@ -111,7 +111,7 @@ pub async fn viewer_wasm(
         },
         None => RenderConfig {
             no_vsync: false,
-            background_color: wgpu::Color::BLACK,
+            background_color: wgpu::Color::WHITE,
             show_colormap_editor: true,
             show_volume_info: true,
             show_cmap_select: true,
@@ -157,15 +157,15 @@ pub async fn download_file(window: web_sys::Window, url: String) -> Result<Vec<u
     Ok(byte_buffer.to_vec())
 }
 
-async fn load_colormap() -> Result<Option<Vec<u8>>,JsValue>{
+async fn load_colormap() -> Result<Option<Vec<u8>>, JsValue> {
     let window = web_sys::window().ok_or(JsError::new("cannot access window"))?;
     let search_string = window.location().search()?;
     let file_param = web_sys::UrlSearchParams::new_with_str(&search_string)?.get("colormap");
 
-    return match file_param{
-        Some(url)=> download_file(window, url).await.map(|v|Some(v)),
-        None=> Ok(None)
-    } 
+    return match file_param {
+        Some(url) => download_file(window, url).await.map(|v| Some(v)),
+        None => Ok(None),
+    };
 }
 
 /// load volume data from a file file promt or url (HTTP Get parameter "file")
@@ -183,7 +183,7 @@ async fn load_data() -> Result<Vec<u8>, JsValue> {
         loop {
             if let Some(reader) = rfd::AsyncFileDialog::new()
                 .set_title("Select npy file")
-                .add_filter("numpy file", &["npy", "npz"])
+                .add_filter("numpy file", &["npy", "npz","nii"])
                 .pick_file()
                 .await
             {
@@ -195,7 +195,6 @@ async fn load_data() -> Result<Vec<u8>, JsValue> {
     };
     return Ok(file_data);
 }
-
 
 /// Start the viewer with the given canvas id and optional volume data and colormap.
 /// If volume data and colormap are not provided, the viewer will prompt the user to select a file (or load from a url provided in the page url).
@@ -229,27 +228,41 @@ async fn start_viewer(
     spinner.set_attribute("style", "display:flex;")?;
     let volume_data = match volume_data {
         Some(data) => data,
-        None => load_data().await?
+        None => load_data().await?,
     };
     // load colormap from url if present
     let colormap = match colormap {
         Some(data) => Some(data),
-        None => load_colormap().await?
+        None => load_colormap().await?,
     };
     let colormap = match colormap {
-        Some(data) => GenericColorMap::read(Cursor::new(data)).map_err(|e| JsError::new(&format!("Failed to load colormap: {}", e)))?.into_linear_segmented(COLORMAP_RESOLUTION),
+        Some(data) => GenericColorMap::read(Cursor::new(data))
+            .map_err(|e| JsError::new(&format!("Failed to load colormap: {}", e)))?
+            .into_linear_segmented(COLORMAP_RESOLUTION),
         None => cmap::COLORMAPS["seaborn"]["icefire"]
             .clone()
             .into_linear_segmented(COLORMAP_RESOLUTION),
     };
 
     wasm_bindgen_futures::spawn_local(async move {
-    
         let reader_v = Cursor::new(volume_data);
-        let volumes: Volume = Volume::load(reader_v).unwrap();
+        let volumes = Volume::load(reader_v);
         overlay.set_attribute("style", "display:none;").ok();
 
-        open_window(window_builder, volumes, colormap, render_config).await
+        match volumes{
+            Ok(volumes) => open_window(window_builder, volumes, colormap, render_config).await,
+            Err(err) => {
+                log::error!("Error: {}", err);
+                let err_elm = document.get_element_by_id("error-message").unwrap();
+                err_elm.set_inner_html(&format!("Error: {}", err));
+                let err_box = document.get_element_by_id("loading-error").unwrap();
+                err_box.set_attribute("style", "display:block;").ok();
+                let spinner = document.get_element_by_id("spinner").unwrap();
+                spinner.set_attribute("style", "display:none;").ok();
+                let overlay = document.get_element_by_id("overlay").unwrap();
+                overlay.set_attribute("style", "display:flex;").ok();
+            } ,
+        }
     });
     Ok(())
 }

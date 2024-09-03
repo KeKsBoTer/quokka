@@ -12,9 +12,10 @@ use crate::{
 #[cfg(feature = "colormaps")]
 use crate::cmap::COLORMAPS;
 
-pub(crate) fn ui(state: &mut WindowContext) {
+/// returns true if a repaint is requested
+pub(crate) fn ui(state: &mut WindowContext) -> bool {
     let ctx = state.ui_renderer.winit.egui_ctx();
-    let with_animation = state.volume.volume.timesteps > 1;
+    let with_animation = state.volume.volume.timesteps() > 1;
     egui::Window::new("Render Settings").fade_in(true).show(ctx, |ui| {
         egui::Grid::new("render_settings")
             .num_columns(2)
@@ -88,7 +89,7 @@ pub(crate) fn ui(state: &mut WindowContext) {
                 let max_far = a+volume_aabb.radius();
                 let max_near = state.camera.projection.zfar;
                 let min_far = state.camera.projection.znear;
-                ui.add(egui::Slider::new(&mut state.camera.projection.znear, min_near..=max_near).clamp_to_range(true));
+                ui.add(egui::Slider::new(&mut state.camera.projection.znear, min_near..=max_near).clamp_to_range(true).fixed_decimals(3));
                 ui.end_row();
 
                 // ui.label("Far Clip Plane");
@@ -99,10 +100,6 @@ pub(crate) fn ui(state: &mut WindowContext) {
                 state.camera.projection.znear = state.camera.projection.znear.clamp(min_near,max_near );
                 state.camera.projection.zfar = state.camera.projection.zfar.clamp(min_far,max_far);
 
-                if ui.button("reset").clicked(){
-
-    ctx.memory_mut(|m|m.reset_areas());
-                }
             });
         CollapsingHeader::new("Advanced").show_unindented(ui, |ui| {
             Grid::new("settings_advanced")
@@ -125,7 +122,7 @@ pub(crate) fn ui(state: &mut WindowContext) {
                         )
                     });
                     ui.vertical(|ui| {
-                        if state.volume.volume.timesteps > 1 {
+                        if state.volume.volume.timesteps() > 1 {
                             egui::ComboBox::new("temporal_interpolation", "Time")
                                 .selected_text(match state.render_settings.temporal_filter {
                                     wgpu::FilterMode::Nearest => "Nearest",
@@ -490,10 +487,10 @@ pub(crate) fn ui(state: &mut WindowContext) {
                 .striped(true)
                 .show(ui, |ui| {
                     ui.label("Timesteps");
-                    ui.label(state.volume.volume.timesteps.to_string());
+                    ui.label(state.volume.volume.timesteps().to_string());
                     ui.end_row();
                     ui.label("Resolution");
-                    let res = state.volume.volume.resolution;
+                    let res = state.volume.volume.resolution();
                     ui.label(format!("{}x{}x{} (WxHxD)", res.x, res.y, res.z));
                     ui.end_row();
                     ui.label("Value range");
@@ -574,6 +571,7 @@ pub(crate) fn ui(state: &mut WindowContext) {
                 ));
             }
         });
+    return ctx.has_requested_repaint();
 }
 
 use cgmath::{Angle, InnerSpace, Transform, Vector3, Vector4};
@@ -660,6 +658,10 @@ pub fn tf_ui(ui: &mut Ui, points: &mut Vec<(f32, f32, f32)>) -> egui::Response {
 }
 
 use std::hash::Hash;
+
+/// Load or create a texture from a colormap
+/// If the texture is already loaded, return the texture id
+/// Otherwise, create a new texture and store it in the egui context
 fn load_or_create<C>(ui: &egui::Ui, cmap: C, n: u32) -> egui::TextureId
 where
     C: ColorMap + Hash,
@@ -679,6 +681,44 @@ where
             );
             let tex_id = tex.id();
             ui.ctx().data_mut(|d| d.insert_temp(id, tex));
+            return tex_id;
+        }
+    }
+}
+
+// stores colormap texture in egui context
+// only updates texture if it changed
+fn cmap_preview<C>(ui: &egui::Ui, cmap: C, n: u32) -> egui::TextureId
+where
+    C: ColorMap + Hash,
+{
+    let id: Id = Id::new("cmap_preview_texture");
+    let tex: Option<(Id, egui::TextureHandle)> = ui.ctx().data_mut(|d| d.get_temp(id));
+    match tex {
+        Some((old_id, mut tex)) => {
+            if old_id != id.with(&cmap) {
+                tex.set(
+                    egui::ColorImage::from_rgba_unmultiplied(
+                        [n as usize, 1],
+                        bytemuck::cast_slice(&cmap.rasterize(n as usize)),
+                    ),
+                    egui::TextureOptions::LINEAR,
+                );
+            }
+            tex.id()
+        }
+        None => {
+            let tex = ui.ctx().load_texture(
+                id.value().to_string(),
+                egui::ColorImage::from_rgba_unmultiplied(
+                    [n as usize, 1],
+                    bytemuck::cast_slice(&cmap.rasterize(n as usize)),
+                ),
+                egui::TextureOptions::LINEAR,
+            );
+            let tex_id = tex.id();
+            ui.ctx()
+                .data_mut(|d| d.insert_temp(id, (id.with(cmap), tex)));
             return tex_id;
         }
     }
@@ -723,7 +763,7 @@ fn optional_drag<T: Numeric>(
 }
 
 fn show_cmap(ui: &mut egui::Ui, id: egui::Id, cmap: impl ColorMap + Hash, vmin: f32, vmax: f32) {
-    let texture = load_or_create(ui, cmap, COLORMAP_RESOLUTION);
+    let texture = cmap_preview(ui, cmap, COLORMAP_RESOLUTION);
     let width = vmax - vmin;
     let height = width / 5.;
     let image = PlotImage::new(
