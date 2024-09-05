@@ -224,6 +224,9 @@ name = "arrayvec"
 version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c02d123df017efcdfbd739ef81735b36c5ba83ec3c59c80a9d7ecc718f92e50"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "as-raw-xcb-connection"
@@ -737,6 +740,7 @@ dependencies = [
  "approx",
  "bytemuck",
  "num-traits",
+ "serde",
 ]
 
 [[package]]
@@ -4362,6 +4366,7 @@ dependencies = [
  "parking_lot",
  "profiling",
  "raw-window-handle",
+ "serde",
  "smallvec",
  "static_assertions",
  "wasm-bindgen",
@@ -4392,6 +4397,7 @@ dependencies = [
  "profiling",
  "raw-window-handle",
  "rustc-hash",
+ "serde",
  "smallvec",
  "thiserror",
  "web-sys",
@@ -4452,6 +4458,7 @@ checksum = "1353d9a46bff7f955a680577f34c69122628cc2076e1d6f3a9be6ef00ae793ef"
 dependencies = [
  "bitflags 2.6.0",
  "js-sys",
+ "serde",
  "web-sys",
 ]
 

@@ -1,0 +1,53 @@
+{
+  "name": "ssao",
+  "render_settings": {
+    "spatial_filter": "linear",
+    "temporal_filter": "linear",
+    "dvr": {
+      "enabled": false,
+      "vmin": null,
+      "vmax": null,
+      "distance_scale": 1.0
+    },
+    "iso_surface": {
+      "enabled": true,
+      "use_cube_surface_grad": false,
+      "shininess": 45.0,
+      "threshold": 0.5,
+      "ambient_color": {
+        "x": 1.0,
+        "y": 1.0,
+        "z": 1.0
+      },
+      "specular_color": {
+        "x": 0.7,
+        "y": 0.7,
+        "z": 0.7
+      },
+      "light_color": {
+        "x": 1.0,
+        "y": 1.0,
+        "z": 1.0
+      },
+      "diffuse_color": {
+        "x": 0.30647823,
+        "y": 0.19078541,
+        "z": 0.011416473,
+        "w": 1.0
+      }
+    },
+    "ssao": {
+      "enabled": true,
+      "radius": 0.4,
+      "bias": 0.02,
+      "kernel_size": 256
+    },
+    "background_color": {
+      "r": 1.0,
+      "g": 1.0,
+      "b": 1.0,
+      "a": 1.0
+    }
+  },
+  "cmap": null
+}

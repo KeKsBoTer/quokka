@@ -4,7 +4,7 @@ use image::{ImageBuffer, Rgba};
 use crate::{
     camera::{Camera, OrthographicProjection, Projection},
     cmap::{ColorMapGPU, GenericColorMap, COLORMAP_RESOLUTION},
-    renderer::{RenderSettings, VolumeRenderer},
+    renderer::{DVRSettings, RenderSettings, RenderState, VolumeRenderer},
     volume::{Volume, VolumeGPU},
     WGPUContext,
 };
@@ -16,7 +16,7 @@ async fn render_view<P: Projection>(
     volume: &VolumeGPU,
     cmap: &ColorMapGPU,
     camera: Camera<P>,
-    render_settings: &RenderSettings,
+    render_settings: &RenderState,
     bg: wgpu::Color,
     resolution: Vector2<u32>,
 ) -> anyhow::Result<ImageBuffer<Rgba<u8>, Vec<u8>>> {
@@ -107,14 +107,21 @@ pub async fn render_volume(
             &volume_gpu[0],
             &cmap_gpu,
             camera,
-            &RenderSettings {
+            &RenderState {
                 time: *time,
-                vmin,
-                vmax,
-                distance_scale,
-                spatial_filter: spatial_interpolation,
-                temporal_filter: temporal_interpolation,
-                ..Default::default()
+                settings: RenderSettings {
+                    dvr: DVRSettings {
+                        vmin,
+                        vmax,
+                        distance_scale: distance_scale,
+                        ..Default::default()
+                    },
+                    spatial_filter: spatial_interpolation,
+                    temporal_filter: temporal_interpolation,
+                    ..Default::default()
+                },
+                gamma_correction: !render_format.is_srgb(),
+                step_size: 1e-4,
             },
             bg,
             resolution,

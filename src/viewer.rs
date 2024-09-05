@@ -3,7 +3,7 @@ use std::{ffi::OsString, fmt::Debug, fs::File, io::BufReader, path::PathBuf};
 
 use winit::{dpi::PhysicalSize, window::WindowBuilder};
 
-use crate::{cmap, open_window, volume::Volume, RenderConfig};
+use crate::{cmap, open_window, presets::Preset, volume::Volume, RenderConfig};
 
 #[derive(Debug, Parser)]
 #[command(author, version, about)]
@@ -16,6 +16,8 @@ struct Opt {
 
     #[cfg(not(feature = "colormaps"))]
     colormap: PathBuf,
+
+    preset: Option<PathBuf>,
 }
 
 pub async fn viewer<I, T>(args: I) -> anyhow::Result<()>
@@ -40,21 +42,28 @@ where
         cmap::GenericColorMap::read(reader)?
     };
 
+    let preset = opt
+        .preset
+        .as_ref()
+        .map(|path| {
+            let reader = File::open(path)?;
+            Preset::from_json(reader)
+        })
+        .transpose()
+        .map_err(|e| anyhow::anyhow!("Failed to load preset: {}", e))?;
+
     open_window(
         window_builder,
         volumes,
         cmap.into_linear_segmented(cmap::COLORMAP_RESOLUTION),
         RenderConfig {
             no_vsync: opt.no_vsync,
-            background_color: wgpu::Color::WHITE,
             show_colormap_editor: true,
             show_volume_info: true,
-            vmin: None,
-            vmax: None,
             #[cfg(feature = "colormaps")]
             show_cmap_select: true,
             duration: None,
-            distance_scale: 1.0,
+            preset,
         },
     )
     .await;

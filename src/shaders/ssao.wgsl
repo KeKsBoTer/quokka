@@ -9,7 +9,6 @@ struct CameraUniforms {
 
 struct Settings {
     volume_aabb: Aabb,
-    clipping: Aabb,
 
     time: f32,
     time_steps: u32,

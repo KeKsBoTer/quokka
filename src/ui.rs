@@ -5,9 +5,11 @@ use egui::{emath::Numeric, vec2};
 use egui_plot::{Plot, PlotImage, PlotPoint};
 
 use crate::{
-    cmap::{ColorMap, COLORMAP_RESOLUTION},
-    WindowContext,
+    cmap::{ColorMap, COLORMAP_RESOLUTION}, presets::Preset, WindowContext
 };
+
+#[cfg(target_arch = "wasm32")]
+use crate::local_storage;
 
 #[cfg(feature = "colormaps")]
 use crate::cmap::COLORMAPS;
@@ -26,7 +28,7 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
                     // ui.end_row();
                     ui.horizontal(|ui| {
                         ui.add(
-                            egui::Slider::new(&mut state.render_settings.time, (0.)..=(1.))
+                            egui::Slider::new(&mut state.render_state.time, (0.)..=(1.))
                                 .show_value(false)
                                 .clamp_to_range(true)
                                 .trailing_fill(true)
@@ -54,13 +56,13 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
 
                 ui.label("Background");
                 let mut bg = [
-                    state.render_settings.background_color.r as f32,
-                    state.render_settings.background_color.g as f32,
-                    state.render_settings.background_color.b as f32,
-                    state.render_settings.background_color.a as f32,
+                    state.render_state.settings.background_color.r as f32,
+                    state.render_state.settings.background_color.g as f32,
+                    state.render_state.settings.background_color.b as f32,
+                    state.render_state.settings.background_color.a as f32,
                 ];
                 ui.color_edit_button_rgba_premultiplied(&mut bg);
-                state.render_settings.background_color = wgpu::Color {
+                state.render_state.settings.background_color = wgpu::Color {
                     r: bg[0] as f64,
                     g: bg[1] as f64,
                     b: bg[2] as f64,
@@ -72,8 +74,8 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
                     ui.add(egui::Label::new("Rendering Modes").wrap_mode(TextWrapMode::Extend));
                 });
                 ui.vertical(|ui| {
-                    ui.checkbox(&mut state.render_settings.render_volume, "Volume");
-                    ui.checkbox(&mut state.render_settings.render_iso, "Iso Surface");
+                    ui.checkbox(&mut state.render_state.settings.dvr.enabled, "Volume");
+                    ui.checkbox(&mut state.render_state.settings.iso_surface.enabled, "Iso Surface");
                 });
 
                 ui.end_row();
@@ -100,15 +102,91 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
                 state.camera.projection.znear = state.camera.projection.znear.clamp(min_near,max_near );
                 state.camera.projection.zfar = state.camera.projection.zfar.clamp(min_far,max_far);
 
+                ui.end_row();
             });
+
+        CollapsingHeader::new("Presets").show_unindented(ui, |ui| {
+            egui::Grid::new("presets grid").max_col_width(100.).num_columns(2).show(ui,|ui|{
+            if state.presets.len() > 0{
+                    ui.label("Load Preset");
+                    egui::ComboBox::new("preset select", "")
+                        .selected_text(
+                            "<Select Preset>",)
+                        .show_ui(ui, |ui| {
+                            for (name,p) in &state.presets{
+                                if ui.selectable_label(
+                                    false,
+                                    p.name.clone(),
+                                ).clicked(){
+                                    state.render_state.settings = p.render_settings.clone();
+                                    state.selected_preset = Some(name.clone());
+                                    if let Some(cmap) = &p.cmap{
+                                        state.cmap = cmap.clone();
+                                    }
+                                    log::info!("Loaded preset {}", p.name);
+                                }
+                            }
+                        });
+            }else{
+                ui.label("No presets available");
+            }
+            ui.end_row();
+
+            ui.label("New Preset");
+
+            let mut file_name = ctx.data_mut(|d| {
+                let file_name: &mut String = d.get_temp_mut_or(Id::new("preset_name"), "my_preset".to_string());
+                return file_name.clone();
+            });
+            TextEdit::singleline(&mut file_name ).show(ui);
+            ctx.data_mut(|d| {
+                d.insert_temp(Id::new("preset_name"), file_name.clone());
+            });
+            ui.end_row();
+            ui.label("");
+            #[cfg(not(target_arch = "wasm32"))]
+            if ui.button("Save to File").clicked(){
+                let file = rfd::FileDialog::new().set_directory("./").add_filter("JSON File", &["json"]).save_file();
+                if let Some(file) = file {
+                    let file = std::fs::File::create(file).unwrap();
+                    let preset = Preset{
+                        name: file_name.clone(),
+                        render_settings: state.render_state.settings.clone(),
+                        cmap: state.render_state.settings.dvr.enabled.then_some(state.cmap.clone()),
+                    };
+                    serde_json::to_writer_pretty(file, &preset).unwrap();
+                    log::info!("Saved present to {}", file_name);
+                }
+            }
+            #[cfg(target_arch = "wasm32")]
+            if ui.button("Save").clicked(){
+                match crate::presets::Presets::from_local_storage(){
+                    Ok(mut local_presets) => {
+                        let new_preset = Preset{
+                            name: file_name.clone(),
+                            render_settings: state.render_state.settings.clone(),
+                            cmap: state.render_state.settings.dvr.enabled.then_some(state.cmap.clone()),
+                        };
+                        local_presets.0.insert(file_name.clone(), new_preset.clone());
+                        local_storage().unwrap().set_item("presets", &serde_json::to_string(&local_presets).unwrap()).unwrap();
+                        state.presets.insert(file_name.clone(), new_preset);
+                        log::info!("Saved present to local storage");
+                    },
+                    Err(err) => log::error!("failed to load presets from local storage: {}", err)
+                }
+                
+            }
+        });
+        });
+
         CollapsingHeader::new("Advanced").show_unindented(ui, |ui| {
             Grid::new("settings_advanced")
                 .num_columns(2)
                 .show(ui, |ui| {
-                    if state.render_settings.spatial_filter == wgpu::FilterMode::Linear{
+                    if state.render_state.settings.spatial_filter == wgpu::FilterMode::Linear{
                         ui.label("Step Size").on_hover_text("Distance between sample steps for rendering.\nSmaller values give better quality but are slower.");
                         ui.add(
-                            egui::DragValue::new(&mut state.render_settings.step_size)
+                            egui::DragValue::new(&mut state.render_state.step_size)
                                 .speed(0.01)
                                 .range((1e-3)..=(0.1)),
                         );
@@ -124,18 +202,18 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
                     ui.vertical(|ui| {
                         if state.volume.volume.timesteps() > 1 {
                             egui::ComboBox::new("temporal_interpolation", "Time")
-                                .selected_text(match state.render_settings.temporal_filter {
+                                .selected_text(match state.render_state.settings.temporal_filter {
                                     wgpu::FilterMode::Nearest => "Nearest",
                                     wgpu::FilterMode::Linear => "Linear",
                                 })
                                 .show_ui(ui, |ui| {
                                     ui.selectable_value(
-                                        &mut state.render_settings.temporal_filter,
+                                        &mut state.render_state.settings.temporal_filter,
                                         wgpu::FilterMode::Nearest,
                                         "Nearest",
                                     );
                                     ui.selectable_value(
-                                        &mut state.render_settings.temporal_filter,
+                                        &mut state.render_state.settings.temporal_filter,
                                         wgpu::FilterMode::Linear,
                                         "Linear",
                                     )
@@ -145,18 +223,18 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
                         }
 
                         egui::ComboBox::new("spatial_interpolation", "Space")
-                            .selected_text(match state.render_settings.spatial_filter {
+                            .selected_text(match state.render_state.settings.spatial_filter {
                                 wgpu::FilterMode::Nearest => "Nearest",
                                 wgpu::FilterMode::Linear => "Linear",
                             })
                             .show_ui(ui, |ui| {
                                 ui.selectable_value(
-                                    &mut state.render_settings.spatial_filter,
+                                    &mut state.render_state.settings.spatial_filter,
                                     wgpu::FilterMode::Nearest,
                                     "Nearest",
                                 );
                                 ui.selectable_value(
-                                    &mut state.render_settings.spatial_filter,
+                                    &mut state.render_state.settings.spatial_filter,
                                     wgpu::FilterMode::Linear,
                                     "Linear",
                                 )
@@ -172,14 +250,14 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
 
     // let mut cmap = state.cmap.clone();
 
-    if state.colormap_editor_visible && state.render_settings.render_volume {
+    if state.colormap_editor_visible && state.render_state.settings.dvr.enabled {
         egui::Window::new("Volume Rendering")
             .default_size(vec2(300., 50.))
             .show(ctx, |ui| {
                 Grid::new("settings_volume").num_columns(2).show(ui,|ui|{
                     ui.label("Density Scale");
                     ui.add(
-                        egui::DragValue::new(&mut state.render_settings.distance_scale)
+                        egui::DragValue::new(&mut state.render_state.settings.dvr.distance_scale)
                             .speed(0.01)
                             .range((1e-4)..=(100000.)),
                     );
@@ -193,11 +271,11 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
                     });
                     ui.vertical(|ui| {
                         let min_b = state
-                        .render_settings
+                        .render_state.settings.dvr
                         .vmin
                         .unwrap_or(state.volume.volume.min_value);
                         let max_b = state
-                            .render_settings
+                            .render_state.settings.dvr
                             .vmax
                             .unwrap_or(state.volume.volume.max_value);
 
@@ -207,7 +285,7 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
                             ui.add(egui::Label::new("Min"));
                             optional_drag(
                                 ui,
-                                &mut state.render_settings.vmin,
+                                &mut state.render_state.settings.dvr.vmin,
                                 Some(vmin_min..=max_b),
                                 Some(0.01),
                                 Some(vmin_min),
@@ -217,7 +295,7 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
                             ui.label("Max");
                             optional_drag(
                                 ui,
-                                &mut state.render_settings.vmax,
+                                &mut state.render_state.settings.dvr.vmax,
                                 Some(min_b..=vmax_max),
                                 Some(0.01),
                                 Some(vmax_max),
@@ -301,11 +379,11 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
                     }
                 });
                 let vmin = state
-                    .render_settings
+                    .render_state.settings.dvr
                     .vmin
                     .unwrap_or(state.volume.volume.min_value);
                 let vmax = state
-                    .render_settings
+                    .render_state.settings.dvr
                     .vmax
                     .unwrap_or(state.volume.volume.max_value);
                 ui.add(egui::Label::new(egui::RichText::new("Preview").strong()));
@@ -366,7 +444,7 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
         .cmap_gpu
         .update(&state.wgpu_context.queue, &state.cmap);
 
-    if state.render_settings.render_iso {
+    if state.render_state.settings.iso_surface.enabled {
         egui::Window::new("Iso Surface Rendering")
             .default_size(vec2(300., 50.))
             .show(ctx, |ui: &mut Ui| {
@@ -376,20 +454,25 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
                     .show(ui, |ui| {
                         ui.label("Threshold");
                         ui.add(
-                            egui::DragValue::new(&mut state.render_settings.iso_threshold)
-                                .range(
-                                    state.volume.volume.min_value..=state.volume.volume.max_value, // TODO use all volume for vmin vmax
-                                )
-                                .speed(0.1),
+                            egui::DragValue::new(
+                                &mut state.render_state.settings.iso_surface.threshold,
+                            )
+                            .range(
+                                state.volume.volume.min_value..=state.volume.volume.max_value, // TODO use all volume for vmin vmax
+                            )
+                            .speed(0.1),
                         );
                         ui.end_row();
 
                         ui.label("Color");
-                        color_edit_button_rgba(ui, &mut state.render_settings.iso_diffuse_color);
+                        color_edit_button_rgba(
+                            ui,
+                            &mut state.render_state.settings.iso_surface.diffuse_color,
+                        );
                         ui.end_row();
 
                         ui.label("SSAO");
-                        ui.checkbox(&mut state.render_settings.ssao, "");
+                        ui.checkbox(&mut state.render_state.settings.ssao.enabled, "");
                         ui.end_row();
                     });
 
@@ -404,7 +487,7 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
                                     ui.label("Shininess");
                                     ui.add(
                                         egui::DragValue::new(
-                                            &mut state.render_settings.iso_shininess,
+                                            &mut state.render_state.settings.iso_surface.shininess,
                                         )
                                         .range((0.)..=1e6),
                                     );
@@ -413,21 +496,21 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
                                     ui.label("Ambient Color");
                                     color_edit_button_rgb(
                                         ui,
-                                        &mut state.render_settings.iso_ambient_color,
+                                        &mut state.render_state.settings.iso_surface.ambient_color,
                                     );
                                     ui.end_row();
 
                                     ui.label("Specular Color");
                                     color_edit_button_rgb(
                                         ui,
-                                        &mut state.render_settings.iso_specular_color,
+                                        &mut state.render_state.settings.iso_surface.specular_color,
                                     );
                                     ui.end_row();
 
                                     ui.label("Light Color");
                                     color_edit_button_rgb(
                                         ui,
-                                        &mut state.render_settings.iso_light_color,
+                                        &mut state.render_state.settings.iso_surface.light_color,
                                     );
                                     ui.end_row();
                                 });
@@ -439,17 +522,17 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
                                 .num_columns(2)
                                 .striped(true)
                                 .show(ui, |ui| {
-                                    if state.render_settings.ssao {
+                                    if state.render_state.settings.ssao.enabled {
                                         ui.label("Radius");
                                         ui.add(egui::Slider::new(
-                                            &mut state.render_settings.ssao_radius,
+                                            &mut state.render_state.settings.ssao.radius,
                                             0.01..=2.0,
                                         ));
                                         ui.end_row();
                                         ui.label("Bias");
                                         ui.add(
                                             egui::Slider::new(
-                                                &mut state.render_settings.ssao_bias,
+                                                &mut state.render_state.settings.ssao.bias,
                                                 0.001..=0.2,
                                             )
                                             .logarithmic(true),
@@ -458,19 +541,23 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
                                         ui.label("Kernel Size");
                                         ui.add(
                                             egui::Slider::new(
-                                                &mut state.render_settings.ssao_kernel_size,
+                                                &mut state.render_state.settings.ssao.kernel_size,
                                                 1..=256,
                                             )
                                             .logarithmic(true),
                                         );
                                         ui.end_row();
                                     }
-                                    if state.render_settings.spatial_filter
+                                    if state.render_state.settings.spatial_filter
                                         == wgpu::FilterMode::Nearest
                                     {
                                         ui.label("Cube Surface Normal");
                                         ui.checkbox(
-                                            &mut state.render_settings.use_cube_surface_grad,
+                                            &mut state
+                                                .render_state
+                                                .settings
+                                                .iso_surface
+                                                .use_cube_surface_grad,
                                             "",
                                         );
                                         ui.end_row();
@@ -571,6 +658,19 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
                 ));
             }
         });
+
+    // check if the selected preset is still valid
+    // if let Some(preset) = &state.selected_preset {
+    //     let curr_preset = &state.presets[preset];
+    //     let cmap_same = match &curr_preset.cmap {
+    //         Some(cmap) => state.cmap == *cmap,
+    //         None => state.cmap.a.is_none(),
+    //     };
+    //     if curr_preset.render_settings != state.render_state.settings || !cmap_same {
+    //         state.selected_preset = None;
+    //     }
+    // }
+
     return ctx.has_requested_repaint();
 }
 

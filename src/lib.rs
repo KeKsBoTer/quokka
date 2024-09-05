@@ -3,13 +3,10 @@ use cmap::LinearSegmentedColorMap;
 use controller::CameraController;
 use egui::FullOutput;
 use image::ImageReader;
-use renderer::{RenderSettings, VolumeRenderer};
+use renderer::{IsoSettings, RenderSettings, RenderState, VolumeRenderer};
 use ssao::SSAOTextures;
 use std::{
-    hash::{DefaultHasher, Hash, Hasher},
-    io::Cursor,
-    path::PathBuf,
-    sync::Arc,
+    collections::HashMap, hash::{DefaultHasher, Hash, Hasher}, io::Cursor, path::PathBuf, sync::Arc
 };
 use volume::VolumeGPU;
 
@@ -52,19 +49,19 @@ mod ui_renderer;
 mod viewer;
 pub mod volume;
 pub use viewer::viewer;
+mod presets;
+
+use presets::{Preset, PRESETS};
 
 #[derive(Debug)]
 pub struct RenderConfig {
     pub no_vsync: bool,
-    pub background_color: wgpu::Color,
     pub show_colormap_editor: bool,
     pub show_volume_info: bool,
-    pub vmin: Option<f32>,
-    pub vmax: Option<f32>,
-    pub distance_scale: f32,
     #[cfg(feature = "colormaps")]
     pub show_cmap_select: bool,
     pub duration: Option<Duration>,
+    pub preset: Option<Preset>,
 }
 
 pub struct WGPUContext {
@@ -116,11 +113,11 @@ pub struct WindowContext {
     volume: VolumeGPU,
     renderer: VolumeRenderer,
 
-    render_settings: RenderSettings,
+    render_state: RenderState,
     cmap_gpu: cmap::ColorMapGPU,
     cmap: LinearSegmentedColorMap,
 
-    playing: bool,
+    playing: bool, 
     animation_duration: Duration,
 
     colormap_editor_visible: bool,
@@ -134,6 +131,9 @@ pub struct WindowContext {
     show_box: bool,
 
     last_state_hash: u64,
+
+    presets: HashMap<String, Preset>,
+    selected_preset: Option<String>,
 }
 
 impl WindowContext {
@@ -199,20 +199,42 @@ impl WindowContext {
         let render_format = surface_format;
         let renderer = VolumeRenderer::new(device, render_format);
 
-        let render_settings = RenderSettings {
-            clipping_aabb: None,
+        let mut presets = PRESETS.clone();
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            match crate::presets::Presets::from_local_storage(){
+                Ok(local_presets) => {
+                    log::info!("loaded {} presets from local storage", local_presets.0.len());
+                    presets.extend(local_presets.0);
+                },
+                Err(err) => log::error!("failed to load presets from local storage: {}", err)
+            }
+        }
+
+        let mut selected_preset = None;
+
+        let render_settings = render_config
+            .preset
+            .as_ref()
+            .map(|preset| {
+                presets.insert(preset.name.clone(), preset.clone());
+                selected_preset = Some(preset.name.clone());
+                preset.render_settings.clone()
+            })
+            .unwrap_or(RenderSettings{
+                iso_surface:IsoSettings{
+                    threshold: (volume.min_value+volume.max_value)/2.,
+                    ..Default::default()
+                },
+                ..Default::default()
+            });
+
+        let render_state = RenderState {
             time: 0.,
-            step_size: 2. / 1000.,
-            spatial_filter: wgpu::FilterMode::Linear,
-            temporal_filter: wgpu::FilterMode::Linear,
-            distance_scale: render_config.distance_scale,
-            vmin: render_config.vmin,
-            vmax: render_config.vmax,
-            gamma_correction: !surface_format.is_srgb(),
-            render_volume: false,
-            render_iso: true,
-            background_color: render_config.background_color,
-            ..Default::default()
+            settings: render_settings,
+            gamma_correction: !render_format.is_srgb(),
+            step_size: 2e-3,
         };
 
         let mut controller = CameraController::new(0.1, 0.05);
@@ -250,7 +272,7 @@ impl WindowContext {
             volume: volumes_gpu,
             renderer,
 
-            render_settings,
+            render_state,
             cmap_gpu,
             cmap,
             animation_duration,
@@ -263,6 +285,8 @@ impl WindowContext {
             ssao_textures,
             show_box: false,
             last_state_hash: 0,
+            presets,
+            selected_preset,
         })
     }
 
@@ -307,13 +331,13 @@ impl WindowContext {
         }
 
         if self.playing && self.volume.volume.timesteps() > 1 {
-            self.render_settings.time += dt.as_secs_f32() / self.animation_duration.as_secs_f32();
-            self.render_settings.time = self.render_settings.time.fract();
+            self.render_state.time += dt.as_secs_f32() / self.animation_duration.as_secs_f32();
+            self.render_state.time = self.render_state.time.fract();
         }
 
         let mut hasher = DefaultHasher::new();
         self.camera.hash(&mut hasher);
-        self.render_settings.hash(&mut hasher);
+        self.render_state.hash(&mut hasher);
         let hash = hasher.finish();
 
         let request_redraw = self.last_state_hash != hash;
@@ -375,7 +399,7 @@ impl WindowContext {
             &self.wgpu_context.device,
             &self.volume,
             &camera,
-            &self.render_settings,
+            &self.render_state,
             &self.cmap_gpu,
         );
 
@@ -405,7 +429,8 @@ impl WindowContext {
             self.renderer.render(&mut render_pass, &frame_data);
         }
 
-        if self.render_settings.render_iso && self.render_settings.ssao {
+        if self.render_state.settings.iso_surface.enabled && self.render_state.settings.ssao.enabled
+        {
             self.ssao.render(
                 &mut encoder,
                 &self.wgpu_context.device,

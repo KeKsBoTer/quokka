@@ -285,7 +285,7 @@ impl ColorMapGPU {
     }
 }
 
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, PartialEq)]
 pub struct LinearSegmentedColorMap {
     /// x, y0,y1
     #[serde(alias = "red")]

@@ -68,7 +68,6 @@ async fn render_to_image(
         &volume,
         &camera,
         &RenderSettings {
-            clipping_aabb: None,
             time: 0.,
             step_size: 1e-4,
             spatial_filter: wgpu::FilterMode::Linear,

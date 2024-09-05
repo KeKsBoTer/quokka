@@ -23,8 +23,7 @@ pub struct Volume {
 }
 
 impl Volume {
-    pub fn from_array( mut data: ArrayBase<OwnedRepr<f16>,IxDyn>) -> Result<Volume, anyhow::Error> {
-        
+    pub fn from_array(mut data: ArrayBase<OwnedRepr<f16>, IxDyn>) -> Result<Volume, anyhow::Error> {
         let dim = data.shape().len();
         if dim != 3 && dim != 4 {
             // if we can squeeze the array, continue
@@ -246,16 +245,14 @@ impl VolumeGPU {
     }
 }
 
-
 #[repr(C)]
-#[derive(Zeroable, Clone, Copy, Debug)]
-pub struct Aabb<F: Float + BaseNum> {
+#[derive(Zeroable, Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
+pub struct Aabb<F: Float + BaseNum + serde::Serialize> {
     pub min: Point3<F>,
     pub max: Point3<F>,
 }
 
-
-impl<F: Float + BaseNum> Aabb<F> {
+impl<F: Float + BaseNum + serde::Serialize> Aabb<F> {
     pub fn unit() -> Self {
         Self {
             min: Point3::new(F::zero(), F::zero(), F::zero()),

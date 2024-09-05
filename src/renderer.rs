@@ -1,10 +1,13 @@
+use std::hash::Hasher;
+
 use crate::{
     camera::{Camera, Projection},
     cmap::ColorMapGPU,
-    volume::{Aabb, Volume, VolumeGPU},
+    volume::{Volume, VolumeGPU},
 };
 
-use cgmath::{EuclideanSpace, Matrix4, SquareMatrix, Vector3, Vector4, Zero};
+use cgmath::{Array, EuclideanSpace, Matrix4, SquareMatrix, Vector3, Vector4, Zero};
+use serde::{Deserialize, Serialize};
 use wgpu::util::DeviceExt;
 
 pub struct VolumeRenderer {
@@ -94,7 +97,7 @@ impl VolumeRenderer {
         device: &wgpu::Device,
         volume: &VolumeGPU,
         camera: &Camera<P>,
-        render_settings: &RenderSettings,
+        render_settings: &RenderState,
         cmap: &'a ColorMapGPU,
     ) -> PerFrameData<'a> {
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -134,7 +137,7 @@ impl VolumeRenderer {
                 wgpu::BindGroupEntry {
                     binding: 2,
                     resource: wgpu::BindingResource::Sampler(
-                        if render_settings.spatial_filter == wgpu::FilterMode::Nearest {
+                        if render_settings.settings.spatial_filter == wgpu::FilterMode::Nearest {
                             &self.sampler_nearest
                         } else {
                             &self.sampler_linear
@@ -286,75 +289,167 @@ impl<P: Projection> From<&Camera<P>> for CameraUniform {
         uniform
     }
 }
-#[derive(Debug, Clone)]
-pub struct RenderSettings {
-    pub clipping_aabb: Option<Aabb<f32>>,
+
+pub struct RenderState {
     pub time: f32,
-    pub step_size: f32,
-    pub spatial_filter: wgpu::FilterMode,
-    pub temporal_filter: wgpu::FilterMode,
-    pub distance_scale: f32,
-    pub vmin: Option<f32>,
-    pub vmax: Option<f32>,
+    pub settings: RenderSettings,
+
     pub gamma_correction: bool,
+    pub step_size: f32,
+}
 
-    pub render_volume: bool,
-    pub render_iso: bool,
+impl std::hash::Hash for RenderState {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.time.to_bits().hash(state);
+        self.settings.hash(state);
+        self.gamma_correction.hash(state);
+        self.step_size.to_bits().hash(state);
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DVRSettings {
+    pub enabled: bool,
+    /// The minimum value used to map the volume data to the transfer function.
+    pub vmin: Option<f32>,
+
+    /// The maximum value used to map the volume data to the transfer function.
+    pub vmax: Option<f32>,
+
+    pub distance_scale: f32,
+}
+
+impl Default for DVRSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            vmin: None,
+            vmax: None,
+            distance_scale: 1.0,
+        }
+    }
+}
+
+impl std::hash::Hash for DVRSettings {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.enabled.hash(state);
+        self.vmin.map(|v| v.to_bits()).hash(state);
+        self.vmax.map(|v| v.to_bits()).hash(state);
+        self.distance_scale.to_bits().hash(state);
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct IsoSettings {
+    pub enabled: bool,
+    /// Indicates whether to use cube surface as normals.
     pub use_cube_surface_grad: bool,
-    pub iso_shininess: f32,
-    pub iso_threshold: f32,
 
-    pub iso_ambient_color: Vector3<f32>,
-    pub iso_specular_color: Vector3<f32>,
-    pub iso_light_color: Vector3<f32>,
-    pub iso_diffuse_color: Vector4<f32>,
+    /// The shininess value used for isosurface rendering.
+    pub shininess: f32,
 
-    pub ssao: bool,
-    pub ssao_radius: f32,
-    pub ssao_bias: f32,
-    pub ssao_kernel_size: u32,
+    /// The threshold value used for isosurface rendering.
+    pub threshold: f32,
 
+    /// The ambient color used for isosurface rendering.
+    pub ambient_color: Vector3<f32>,
+
+    /// The specular color used for isosurface rendering.
+    pub specular_color: Vector3<f32>,
+
+    /// The light color used for isosurface rendering.
+    pub light_color: Vector3<f32>,
+
+    /// The diffuse color used for isosurface rendering.
+    pub diffuse_color: Vector4<f32>,
+}
+
+impl Default for IsoSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            use_cube_surface_grad: false,
+            shininess: 20.0,
+            threshold: 0.5,
+            ambient_color: Vector3::zero(),
+            specular_color: Vector3::new(0.7, 0.7, 0.7),
+            light_color: Vector3::new(1., 1., 1.),
+            diffuse_color: Vector4::new(1.0, 0.871, 0.671, 1.0),
+        }
+    }
+}
+
+impl std::hash::Hash for IsoSettings {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.enabled.hash(state);
+        self.use_cube_surface_grad.hash(state);
+        self.shininess.to_bits().hash(state);
+        self.threshold.to_bits().hash(state);
+
+        array_hash(self.ambient_color, state);
+        array_hash(self.specular_color, state);
+        array_hash(self.light_color, state);
+        array_hash(self.diffuse_color, state);
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SSAOSettings {
+    pub enabled: bool,
+    /// The radius value used for SSAO.
+    pub radius: f32,
+
+    /// The bias value used for SSAO.
+    pub bias: f32,
+
+    /// The kernel size used for SSAO.
+    pub kernel_size: u32,
+}
+
+impl Default for SSAOSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            radius: 0.4,
+            bias: 0.02,
+            kernel_size: 64,
+        }
+    }
+}
+
+impl std::hash::Hash for SSAOSettings {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.enabled.hash(state);
+        self.radius.to_bits().hash(state);
+        self.bias.to_bits().hash(state);
+        self.kernel_size.hash(state);
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+/// Render settings for the renderer module.
+pub struct RenderSettings {
+    /// The spatial filter mode used for rendering.
+    pub spatial_filter: wgpu::FilterMode,
+
+    /// The temporal filter mode used for rendering.
+    pub temporal_filter: wgpu::FilterMode,
+
+    pub dvr: DVRSettings,
+    pub iso_surface: IsoSettings,
+    pub ssao: SSAOSettings,
+
+    /// The background color used for rendering.
     pub background_color: wgpu::Color,
 }
 
 impl std::hash::Hash for RenderSettings {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.clipping_aabb.hash(state);
-        self.time.to_bits().hash(state);
-        self.step_size.to_bits().hash(state);
         self.spatial_filter.hash(state);
         self.temporal_filter.hash(state);
-        self.distance_scale.to_bits().hash(state);
-        self.vmin.map(|v| v.to_bits()).hash(state);
-        self.vmax.map(|v| v.to_bits()).hash(state);
-        self.gamma_correction.hash(state);
-        self.render_volume.hash(state);
-        self.render_iso.hash(state);
-        self.use_cube_surface_grad.hash(state);
-        self.iso_shininess.to_bits().hash(state);
-        self.iso_threshold.to_bits().hash(state);
-
-        self.iso_ambient_color.x.to_bits().hash(state);
-        self.iso_ambient_color.y.to_bits().hash(state);
-        self.iso_ambient_color.z.to_bits().hash(state);
-
-        self.iso_specular_color.x.to_bits().hash(state);
-        self.iso_specular_color.y.to_bits().hash(state);
-        self.iso_specular_color.z.to_bits().hash(state);
-
-        self.iso_light_color.x.to_bits().hash(state);
-        self.iso_light_color.y.to_bits().hash(state);
-        self.iso_light_color.z.to_bits().hash(state);
-
-        self.iso_diffuse_color.x.to_bits().hash(state);
-        self.iso_diffuse_color.y.to_bits().hash(state);
-        self.iso_diffuse_color.z.to_bits().hash(state);
-        self.iso_diffuse_color.w.to_bits().hash(state);
-
+        self.dvr.hash(state);
+        self.iso_surface.hash(state);
         self.ssao.hash(state);
-        self.ssao_radius.to_bits().hash(state);
-        self.ssao_bias.to_bits().hash(state);
-        self.ssao_kernel_size.hash(state);
         self.background_color.r.to_bits().hash(state);
         self.background_color.g.to_bits().hash(state);
         self.background_color.b.to_bits().hash(state);
@@ -365,29 +460,12 @@ impl std::hash::Hash for RenderSettings {
 impl Default for RenderSettings {
     fn default() -> Self {
         Self {
-            clipping_aabb: None,
-            time: 0.,
-            step_size: 1e-4,
             spatial_filter: wgpu::FilterMode::Linear,
             temporal_filter: wgpu::FilterMode::Linear,
-            distance_scale: 1.,
-            vmin: None,
-            vmax: None,
-            gamma_correction: false,
-            render_volume: true,
-            render_iso: false,
-            use_cube_surface_grad: false,
-            iso_shininess: 20.0,
-            iso_threshold: 0.5,
-            iso_ambient_color: Vector3::zero(),
-            iso_specular_color: Vector3::new(0.7, 0.7, 0.7),
-            iso_light_color: Vector3::new(1., 1., 1.),
-            iso_diffuse_color: Vector4::new(1.0, 0.871, 0.671, 1.0),
-            ssao: true,
-            ssao_radius: 0.4,
-            ssao_bias: 0.02,
-            ssao_kernel_size: 64,
-            background_color: wgpu::Color::BLACK,
+            background_color: wgpu::Color::WHITE,
+            dvr: DVRSettings::default(),
+            iso_surface: IsoSettings::default(),
+            ssao: SSAOSettings::default(),
         }
     }
 }
@@ -397,8 +475,6 @@ impl Default for RenderSettings {
 pub struct RenderSettingsUniform {
     volume_aabb_min: Vector4<f32>,
     volume_aabb_max: Vector4<f32>,
-    clipping_min: Vector4<f32>,
-    clipping_max: Vector4<f32>,
 
     time: f32,
     time_steps: u32,
@@ -431,46 +507,42 @@ pub struct RenderSettingsUniform {
     _pad: [u32; 3],
 }
 impl RenderSettingsUniform {
-    pub fn from_settings(settings: &RenderSettings, volume: &Volume) -> Self {
+    pub fn from_settings(state: &RenderState, volume: &Volume) -> Self {
         let volume_aabb = volume.aabb;
+
+        let dvr_settings = &state.settings.dvr;
+        let iso_settings = &state.settings.iso_surface;
+        let ssao_settings = &state.settings.ssao;
 
         Self {
             volume_aabb_min: volume_aabb.min.to_vec().extend(0.),
             volume_aabb_max: volume_aabb.max.to_vec().extend(0.),
-            time: settings.time,
+            time: state.time,
             time_steps: volume.timesteps() as u32,
-            clipping_min: settings
-                .clipping_aabb
-                .map(|bb| bb.min.to_vec().extend(0.))
-                .unwrap_or(RenderSettingsUniform::default().clipping_min),
-            clipping_max: settings
-                .clipping_aabb
-                .map(|bb| bb.max.to_vec().extend(0.))
-                .unwrap_or(RenderSettingsUniform::default().clipping_max),
-            step_size: settings.step_size,
-            temporal_filter: settings.temporal_filter as u32,
-            spatial_filter: settings.spatial_filter as u32,
-            distance_scale: settings.distance_scale,
-            vmin: settings.vmin.unwrap_or(volume.min_value),
-            vmax: settings.vmax.unwrap_or(volume.max_value),
-            gamma_correction: settings.gamma_correction as u32,
-            render_volume: settings.render_volume as u32,
-            render_iso: settings.render_iso as u32,
-            use_cube_surface_grad: settings.use_cube_surface_grad as u32,
-            iso_shininess: settings.iso_shininess,
-            iso_threshold: settings.iso_threshold,
-            iso_ambient_color: settings.iso_ambient_color.extend(0.),
-            iso_specular_color: settings.iso_specular_color.extend(0.),
-            iso_light_color: settings.iso_light_color.extend(0.),
-            iso_diffuse_color: settings.iso_diffuse_color,
-            ssao_radius: settings.ssao_radius,
-            ssao_bias: settings.ssao_bias,
-            ssao_kernel_size: settings.ssao_kernel_size,
+            step_size: state.step_size,
+            temporal_filter: state.settings.temporal_filter as u32,
+            spatial_filter: state.settings.spatial_filter as u32,
+            distance_scale: dvr_settings.distance_scale,
+            vmin: dvr_settings.vmin.unwrap_or(volume.min_value),
+            vmax: dvr_settings.vmax.unwrap_or(volume.max_value),
+            gamma_correction: state.gamma_correction as u32,
+            render_volume: state.settings.dvr.enabled as u32,
+            render_iso: state.settings.iso_surface.enabled as u32,
+            use_cube_surface_grad: iso_settings.use_cube_surface_grad as u32,
+            iso_shininess: iso_settings.shininess,
+            iso_threshold: iso_settings.threshold,
+            iso_ambient_color: iso_settings.ambient_color.extend(0.),
+            iso_specular_color: iso_settings.specular_color.extend(0.),
+            iso_light_color: iso_settings.light_color.extend(0.),
+            iso_diffuse_color: iso_settings.diffuse_color,
+            ssao_radius: ssao_settings.radius,
+            ssao_bias: ssao_settings.bias,
+            ssao_kernel_size: ssao_settings.kernel_size,
             background_color: Vector4::new(
-                settings.background_color.r as f32,
-                settings.background_color.g as f32,
-                settings.background_color.b as f32,
-                settings.background_color.a as f32,
+                state.settings.background_color.r as f32,
+                state.settings.background_color.g as f32,
+                state.settings.background_color.b as f32,
+                state.settings.background_color.a as f32,
             ),
             _pad: [0; 3],
         }
@@ -482,8 +554,6 @@ impl Default for RenderSettingsUniform {
         Self {
             volume_aabb_min: Vector4::new(-1., -1., -1., 0.),
             volume_aabb_max: Vector4::new(1., 1., 1., 0.),
-            clipping_min: Vector4::zero(),
-            clipping_max: Vector4::new(1., 1., 1., 0.),
             time: 0.,
             time_steps: 1,
             step_size: 0.01,
@@ -510,5 +580,16 @@ impl Default for RenderSettingsUniform {
             background_color: Vector4::new(0., 0., 0., 1.),
             _pad: [0; 3],
         }
+    }
+}
+
+use std::hash::Hash;
+fn array_hash<A, H>(v: A, hasher: &mut H)
+where
+    A: Array<Element = f32>,
+    H: Hasher,
+{
+    for i in 0..A::len() {
+        v[i].to_bits().hash(hasher);
     }
 }

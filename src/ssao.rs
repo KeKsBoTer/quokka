@@ -2,11 +2,8 @@ use std::num::NonZero;
 
 use wgpu::util::DeviceExt;
 
-use crate::{
-    camera::OrthographicCamera,
-    renderer::CameraUniform,
-};
 use crate::renderer::{PerFrameData, VolumeRenderer};
+use crate::{camera::OrthographicCamera, renderer::CameraUniform};
 
 pub struct SSAO {
     ssao_pipeline: wgpu::RenderPipeline,
@@ -27,7 +24,7 @@ impl SSAO {
 
         let ssao_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("ssao Pipeline layout"),
-            bind_group_layouts: &[&bg_layout,&VolumeRenderer::bind_group_layout(&device)],
+            bind_group_layouts: &[&bg_layout, &VolumeRenderer::bind_group_layout(&device)],
             push_constant_ranges: &[],
         });
 

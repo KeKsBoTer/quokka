@@ -99,26 +99,20 @@ pub async fn viewer_wasm(
     let render_config = match settings {
         Some(settings) => RenderConfig {
             no_vsync: false,
-            background_color: settings.background_color.into(),
             show_colormap_editor: settings.show_colormap_editor,
             show_volume_info: settings.show_volume_info,
-            vmin: settings.vmin,
-            vmax: settings.vmax,
-            distance_scale: settings.distance_scale,
             #[cfg(feature = "colormaps")]
             show_cmap_select: settings.show_cmap_select,
             duration: settings.duration.map(Duration::from_secs_f32),
+            preset: None,
         },
         None => RenderConfig {
             no_vsync: false,
-            background_color: wgpu::Color::WHITE,
             show_colormap_editor: true,
             show_volume_info: true,
             show_cmap_select: true,
-            vmin: None,
-            vmax: None,
             duration: None,
-            distance_scale: 1.0,
+            preset: None,
         },
     };
 
@@ -183,7 +177,7 @@ async fn load_data() -> Result<Vec<u8>, JsValue> {
         loop {
             if let Some(reader) = rfd::AsyncFileDialog::new()
                 .set_title("Select npy file")
-                .add_filter("numpy file", &["npy", "npz","nii"])
+                .add_filter("numpy file", &["npy", "npz", "nii"])
                 .pick_file()
                 .await
             {
@@ -245,11 +239,11 @@ async fn start_viewer(
     };
 
     wasm_bindgen_futures::spawn_local(async move {
-        let reader_v = Cursor::new(volume_data);
+        let reader_v =  Cursor::new(volume_data);
         let volumes = Volume::load(reader_v);
         overlay.set_attribute("style", "display:none;").ok();
 
-        match volumes{
+        match volumes {
             Ok(volumes) => open_window(window_builder, volumes, colormap, render_config).await,
             Err(err) => {
                 log::error!("Error: {}", err);
@@ -261,8 +255,20 @@ async fn start_viewer(
                 spinner.set_attribute("style", "display:none;").ok();
                 let overlay = document.get_element_by_id("overlay").unwrap();
                 overlay.set_attribute("style", "display:flex;").ok();
-            } ,
+            }
         }
     });
     Ok(())
+}
+
+pub fn local_storage() -> anyhow::Result<web_sys::Storage> {
+    let window = web_sys::window().ok_or(anyhow::anyhow!("failed to get window handle"))?;
+    Ok(window
+        .local_storage()
+        .map_err(|e| {
+            anyhow::anyhow!(e
+                .as_string()
+                .unwrap_or("failed to access local storage".to_string()))
+        })?
+        .ok_or(anyhow::anyhow!("failed to access local storage"))?)
 }
