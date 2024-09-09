@@ -91,14 +91,14 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
                 let max_far = a+volume_aabb.radius();
                 let max_near = state.camera.projection.zfar;
                 let min_far = state.camera.projection.znear;
+                
                 ui.add(egui::Slider::new(&mut state.camera.projection.znear, min_near..=max_near).clamp_to_range(true).fixed_decimals(3));
                 ui.end_row();
 
                 // ui.label("Far Clip Plane");
                 // ui.add(egui::Slider::new(&mut state.camera.projection.zfar, min_far..=max_far).clamp_to_range(true));
 
-                // workaround until clamp_to_range works with sliders again
-
+                // workaround until clamp_to_range works with sliders agai
                 state.camera.projection.znear = state.camera.projection.znear.clamp(min_near,max_near );
                 state.camera.projection.zfar = state.camera.projection.zfar.clamp(min_far,max_far);
 

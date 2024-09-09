@@ -14,12 +14,12 @@ struct Settings {
     time_steps: u32,
     temporal_filter: u32,
     spatial_filter: u32,
-
+    
     distance_scale: f32,
     vmin: f32,
     vmax: f32,
     gamma_correction: u32,
-
+    
     @align(16) @size(16) iso_ambient_color: vec3<f32>,
     @align(16) @size(16) iso_specular_color: vec3<f32>,
     @align(16) @size(16) iso_light_color: vec3<f32>,
@@ -30,14 +30,15 @@ struct Settings {
     use_cube_surface_grad: u32, // whether to use cube surface gradients for render_mode_iso_nearest
     iso_shininess: f32,
 
-    iso_threshold: f32,
-    step_size:f32,
+    ssao_enabled:u32,
     ssao_radius: f32,
     ssao_bias: f32,
+    ssao_kernel_size:u32,
     
     background_color:vec4<f32>,
 
-    ssao_kernel_size:u32
+    iso_threshold: f32,
+    step_size:f32,
 }
 
 struct Aabb {
@@ -224,7 +225,7 @@ fn ssao_frag(vertex_in: VertexOut) -> @location(0) f32 {
         }
     }
 
-    return 1.0 - (occlusion / f32(settings.ssao_kernel_size));
+    return (occlusion / f32(settings.ssao_kernel_size));
 }
 
 // TODO which radius do we need? 
@@ -256,8 +257,8 @@ fn blur_vert_frag(vertex_in: VertexOut) -> @location(0) f32 {
 // next horizontal blur
 // we return a gray scale color as vec4 and multiply it with the rgb image
 @fragment
-fn blur_hor_frag(vertex_in: VertexOut) -> @location(0) vec4<f32> {
+fn blur_hor_frag(vertex_in: VertexOut) -> @location(0) f32 {
     let uv = vec2<f32>(vertex_in.tex_coord.x, vertex_in.tex_coord.y);
     let c = blur9(uv,vec2<f32>(1.,0.));
-    return vec4<f32>(c);
+    return c;
 }

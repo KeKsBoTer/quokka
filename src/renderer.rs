@@ -6,7 +6,7 @@ use crate::{
     volume::{Volume, VolumeGPU},
 };
 
-use cgmath::{Array, EuclideanSpace, Matrix4, SquareMatrix, Vector3, Vector4, Zero};
+use cgmath::{Array, EuclideanSpace, Matrix4, SquareMatrix, Vector2, Vector3, Vector4, Zero};
 use serde::{Deserialize, Serialize};
 use wgpu::util::DeviceExt;
 
@@ -45,7 +45,12 @@ impl VolumeRenderer {
                 targets: &[
                     Some(wgpu::ColorTargetState {
                         format: color_format,
-                        blend: None, //Some(wgpu::BlendState::REPLACE),
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    }),
+                    Some(wgpu::ColorTargetState {
+                        format: color_format,
+                        blend: None,
                         write_mask: wgpu::ColorWrites::ALL,
                     }),
                     Some(wgpu::ColorTargetState {
@@ -496,15 +501,17 @@ pub struct RenderSettingsUniform {
     use_cube_surface_grad: u32,
     iso_shininess: f32,
 
-    iso_threshold: f32,
-    step_size: f32,
+    ssao_enabled:u32,
     ssao_radius: f32,
     ssao_bias: f32,
+    ssao_kernel_size: u32,
+
 
     background_color: Vector4<f32>,
 
-    ssao_kernel_size: u32,
-    _pad: [u32; 3],
+    iso_threshold: f32,
+    step_size: f32,
+    _pad: [u32; 2],
 }
 impl RenderSettingsUniform {
     pub fn from_settings(state: &RenderState, volume: &Volume) -> Self {
@@ -544,7 +551,8 @@ impl RenderSettingsUniform {
                 state.settings.background_color.b as f32,
                 state.settings.background_color.a as f32,
             ),
-            _pad: [0; 3],
+            ssao_enabled: ssao_settings.enabled as u32,
+            _pad: [0;2],
         }
     }
 }
@@ -578,7 +586,8 @@ impl Default for RenderSettingsUniform {
             ssao_bias: 0.02,
             ssao_kernel_size: 64,
             background_color: Vector4::new(0., 0., 0., 1.),
-            _pad: [0; 3],
+            ssao_enabled: 1,
+            _pad: [0; 2],
         }
     }
 }
@@ -591,5 +600,248 @@ where
 {
     for i in 0..A::len() {
         v[i].to_bits().hash(hasher);
+    }
+}
+
+pub struct FrameBuffer {
+    pub size: Vector2<u32>,
+    pub color_dvr_view: wgpu::TextureView,
+    pub color_iso_view: wgpu::TextureView,
+    pub normal_depth_view: wgpu::TextureView,
+
+    pub ssao_view: wgpu::TextureView,
+
+    pub blur_view: wgpu::TextureView,
+
+    pub color_format: wgpu::TextureFormat,
+
+    pub bind_group: wgpu::BindGroup,
+}
+
+impl FrameBuffer {
+    pub fn new(
+        device: &wgpu::Device,
+        size: Vector2<u32>,
+        color_format: wgpu::TextureFormat,
+    ) -> Self {
+        let texture_size = wgpu::Extent3d {
+            width: size.x,
+            height: size.y,
+            depth_or_array_layers: 1,
+        };
+
+        let color_dvr = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("color_dvr"),
+            size: texture_size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: color_format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+
+        let color_iso = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("color_iso"),
+            size: texture_size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: color_format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+
+        let normal_depth = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("normal_depth"),
+            size: texture_size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba16Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+
+        let ssao = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("ssao texture"),
+            size: texture_size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+
+        let blur = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("blur texture"),
+            size: texture_size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+
+        let color_dvr_view = color_dvr.create_view(&wgpu::TextureViewDescriptor::default());
+        let color_iso_view = color_iso.create_view(&wgpu::TextureViewDescriptor::default());
+        let normal_depth_view = normal_depth.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let ssao_view = ssao.create_view(&wgpu::TextureViewDescriptor::default());
+        let blur_view = blur.create_view(&wgpu::TextureViewDescriptor::default());
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("frame buffer sampler"),
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("frame buffer bind group"),
+            layout: &FrameBuffer::bind_group_layout(device),
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&color_dvr_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&color_iso_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(&ssao_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+            ],
+        });
+
+        return Self {
+            size,
+            color_dvr_view,
+            color_iso_view,
+            normal_depth_view,
+            ssao_view,
+            blur_view,
+            color_format,
+            bind_group,
+        };
+    }
+
+    fn bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("display bind group layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        })
+    }
+}
+
+pub struct Display(wgpu::RenderPipeline);
+
+impl Display {
+    pub fn new(
+        device: &wgpu::Device,
+        target_format: wgpu::TextureFormat,
+    ) -> Self {
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("display pipeline layout"),
+            bind_group_layouts: &[
+                &VolumeRenderer::bind_group_layout(&device),
+                &FrameBuffer::bind_group_layout(device),
+            ],
+            push_constant_ranges: &[],
+        });
+
+        let shader = device.create_shader_module(wgpu::include_wgsl!("shaders/display.wgsl"));
+
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("display pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "vs_main",
+                buffers: &[],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "fs_main",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: target_format,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleStrip,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+        });
+
+        Self(pipeline)
+    }
+
+
+    pub fn render<'rpass>(
+        &'rpass self,
+        render_pass: &mut wgpu::RenderPass<'rpass>,
+        frame_buffer: &'rpass FrameBuffer,
+        frame_data: &'rpass PerFrameData,
+    ) {
+        render_pass.set_pipeline(&self.0);
+        render_pass.set_bind_group(0, &frame_data.bind_group, &[]);
+        render_pass.set_bind_group(1, &frame_buffer.bind_group, &[]);
+        render_pass.draw(0..4, 0..1);
     }
 }

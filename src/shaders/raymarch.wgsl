@@ -37,14 +37,15 @@ struct Settings {
     use_cube_surface_grad: u32, // whether to use cube surface gradients for render_mode_iso_nearest
     iso_shininess: f32,
 
-    iso_threshold: f32,
-    step_size:f32,
+    ssao_enabled:u32,
     ssao_radius: f32,
     ssao_bias: f32,
+    ssao_kernel_size:u32,
     
     background_color:vec4<f32>,
 
-    ssao_kernel_size:u32,
+    iso_threshold: f32,
+    step_size:f32,
 }
 
 
@@ -272,7 +273,7 @@ fn intersect_aabb_dir(ray_origin: vec3<f32>, ray_direction: vec3<f32>, lower: ve
 
 
 // traces ray trough volume and returns color
-fn trace_ray(ray_in: Ray, normal_depth: ptr<function,vec4<f32>>) -> vec4<f32> {
+fn trace_ray(ray_in: Ray,color_dvr:ptr<function,vec4<f32>>, color_iso:ptr<function,vec4<f32>>, normal_depth: ptr<function,vec4<f32>>){
     let ray_len = length(ray_in.dir);
     var ray = ray_in;
     ray.dir = normalize(ray.dir);
@@ -288,7 +289,7 @@ fn trace_ray(ray_in: Ray, normal_depth: ptr<function,vec4<f32>>) -> vec4<f32> {
     let intersec = intersectAABB(ray, aabb_min, aabb_max);
 
     if intersec.x > intersec.y {
-        return settings.background_color;
+        return;// return settings.background_color;
     }
 
     let start_cam_pos = ray.orig;
@@ -402,9 +403,7 @@ fn trace_ray(ray_in: Ray, normal_depth: ptr<function,vec4<f32>>) -> vec4<f32> {
                 }
 
                 depth = distance(start_cam_pos, pos);
-                color += transmittance * radiance;
-
-                transmittance = 0.;
+                *color_iso = vec4<f32>(radiance,1.);
 
                 break;
             }
@@ -440,8 +439,10 @@ fn trace_ray(ray_in: Ray, normal_depth: ptr<function,vec4<f32>>) -> vec4<f32> {
     } else {
         normal = (camera.view * vec4<f32>(normal, 0.0)).xyz;
     }
+
+    // write color and normal and depth values
     *normal_depth = vec4<f32>(normal, depth);
-    return blend(vec4<f32>(color, 1. - transmittance),settings.background_color);
+    *color_dvr = vec4<f32>(color, 1. - transmittance);
 }
 
 fn gamma_correction(color: vec4<f32>) -> vec4<f32> {
@@ -450,8 +451,9 @@ fn gamma_correction(color: vec4<f32>) -> vec4<f32> {
 
 
 struct FragmentOut{
-    @location(0) color:vec4<f32>,
-    @location(1) normal_depth:vec4<f32>,
+    @location(0) color_dvr:vec4<f32>,
+    @location(1) color_iso:vec4<f32>,
+    @location(2) normal_depth:vec4<f32>,
 }
 
 @fragment
@@ -459,23 +461,9 @@ fn fs_main(vertex_in: VertexOut) -> FragmentOut {
     let r_pos = vec2<f32>(vertex_in.tex_coord.x, vertex_in.tex_coord.y);
     let ray = create_ray(camera.view_inv, camera.proj_inv, r_pos);
     var normal_depth = vec4<f32>(0.);
-    var color = trace_ray(ray,&normal_depth);
-    if settings.gamma_correction == 1u {
-        color = fromLinear(color);
-    }
-    return FragmentOut(color,normal_depth);
-}
+    var color_iso = vec4<f32>(0.);
+    var color_dvr = vec4<f32>(0.);
+    trace_ray(ray,&color_dvr,&color_iso,&normal_depth);
 
-
-fn fromLinear(color: vec4<f32>) -> vec4<f32> {
-    let cutoff = color.rgb < vec3<f32>(0.0031308);
-    let higher = vec3<f32>(1.055) * pow(color.rgb, vec3<f32>(1.0 / 2.4)) - 0.055;
-    let lower = color.rgb * 12.92;
-
-    return vec4<f32>(mix(higher, lower, vec3<f32>(cutoff)), color.a);
-}
-
-
-fn blend(src: vec4<f32>, dst: vec4<f32>) -> vec4<f32> {
-    return src * src.a + dst * (1. - src.a);
+    return FragmentOut(color_dvr,color_iso,normal_depth);
 }

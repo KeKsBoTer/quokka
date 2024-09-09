@@ -3,10 +3,13 @@ use cmap::LinearSegmentedColorMap;
 use controller::CameraController;
 use egui::FullOutput;
 use image::ImageReader;
-use renderer::{IsoSettings, RenderSettings, RenderState, VolumeRenderer};
-use ssao::SSAOTextures;
+use renderer::{Display, FrameBuffer, IsoSettings, RenderSettings, RenderState, VolumeRenderer};
 use std::{
-    collections::HashMap, hash::{DefaultHasher, Hash, Hasher}, io::Cursor, path::PathBuf, sync::Arc
+    collections::HashMap,
+    hash::{DefaultHasher, Hash, Hasher},
+    io::Cursor,
+    path::PathBuf,
+    sync::Arc,
 };
 use volume::VolumeGPU;
 
@@ -117,7 +120,7 @@ pub struct WindowContext {
     cmap_gpu: cmap::ColorMapGPU,
     cmap: LinearSegmentedColorMap,
 
-    playing: bool, 
+    playing: bool,
     animation_duration: Duration,
 
     colormap_editor_visible: bool,
@@ -126,7 +129,9 @@ pub struct WindowContext {
     cmap_select_visible: bool,
 
     ssao: ssao::SSAO,
-    ssao_textures: ssao::SSAOTextures,
+    display: Display,
+
+    frame_buffer: FrameBuffer,
 
     show_box: bool,
 
@@ -203,12 +208,15 @@ impl WindowContext {
 
         #[cfg(target_arch = "wasm32")]
         {
-            match crate::presets::Presets::from_local_storage(){
+            match crate::presets::Presets::from_local_storage() {
                 Ok(local_presets) => {
-                    log::info!("loaded {} presets from local storage", local_presets.0.len());
+                    log::info!(
+                        "loaded {} presets from local storage",
+                        local_presets.0.len()
+                    );
                     presets.extend(local_presets.0);
-                },
-                Err(err) => log::error!("failed to load presets from local storage: {}", err)
+                }
+                Err(err) => log::error!("failed to load presets from local storage: {}", err),
             }
         }
 
@@ -222,9 +230,9 @@ impl WindowContext {
                 selected_preset = Some(preset.name.clone());
                 preset.render_settings.clone()
             })
-            .unwrap_or(RenderSettings{
-                iso_surface:IsoSettings{
-                    threshold: (volume.min_value+volume.max_value)/2.,
+            .unwrap_or(RenderSettings {
+                iso_surface: IsoSettings {
+                    threshold: (volume.min_value + volume.max_value) / 2.,
                     ..Default::default()
                 },
                 ..Default::default()
@@ -255,8 +263,15 @@ impl WindowContext {
 
         let cmap_gpu = ColorMapGPU::new(&cmap, device, queue, COLORMAP_RESOLUTION);
 
-        let ssao = ssao::SSAO::new(device, render_format);
-        let ssao_textures = SSAOTextures::new(device, config.width, config.height);
+        let ssao = ssao::SSAO::new(device);
+
+        let frame_buffer = FrameBuffer::new(
+            device,
+            Vector2::new(config.width, config.height),
+            render_format,
+        );
+
+        let display = Display::new(device, surface_format);
 
         Ok(Self {
             wgpu_context,
@@ -282,11 +297,12 @@ impl WindowContext {
             #[cfg(feature = "colormaps")]
             cmap_select_visible: render_config.show_cmap_select,
             ssao,
-            ssao_textures,
             show_box: false,
             last_state_hash: 0,
             presets,
             selected_preset,
+            frame_buffer,
+            display,
         })
     }
 
@@ -312,8 +328,11 @@ impl WindowContext {
             self.camera.projection.resize(new_width, new_height);
             self.surface
                 .configure(&self.wgpu_context.device, &self.config);
-            self.ssao_textures =
-                SSAOTextures::new(&self.wgpu_context.device, new_width, new_height);
+            self.frame_buffer = FrameBuffer::new(
+                &self.wgpu_context.device,
+                Vector2::new(new_width, new_height),
+                self.frame_buffer.color_format,
+            );
         }
         if let Some(scale_factor) = scale_factor {
             if scale_factor > 0. {
@@ -408,7 +427,7 @@ impl WindowContext {
                 label: Some("render pass"),
                 color_attachments: &[
                     Some(wgpu::RenderPassColorAttachment {
-                        view: &view_rgb,
+                        view: &self.frame_buffer.color_dvr_view,
                         resolve_target: None,
                         ops: wgpu::Operations {
                             load: wgpu::LoadOp::Load,
@@ -416,7 +435,15 @@ impl WindowContext {
                         },
                     }),
                     Some(wgpu::RenderPassColorAttachment {
-                        view: &self.ssao_textures.normal_depth,
+                        view: &self.frame_buffer.color_iso_view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        },
+                    }),
+                    Some(wgpu::RenderPassColorAttachment {
+                        view: &self.frame_buffer.normal_depth_view,
                         resolve_target: None,
                         ops: wgpu::Operations {
                             load: wgpu::LoadOp::Load,
@@ -434,14 +461,12 @@ impl WindowContext {
             self.ssao.render(
                 &mut encoder,
                 &self.wgpu_context.device,
-                &self.ssao_textures,
+                &self.frame_buffer,
                 &self.camera,
-                &view_rgb,
                 &frame_data,
             );
         }
-
-        if let Some(state) = &ui_state {
+        {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("render pass ui"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -454,9 +479,12 @@ impl WindowContext {
                 })],
                 ..Default::default()
             });
-            self.ui_renderer.render(&mut render_pass, state);
+            self.display
+                .render(&mut render_pass, &self.frame_buffer, &frame_data);
+            if let Some(state) = &ui_state {
+                self.ui_renderer.render(&mut render_pass, state);
+            }
         }
-
         if let Some(ui_state) = ui_state {
             self.ui_renderer.cleanup(ui_state)
         }

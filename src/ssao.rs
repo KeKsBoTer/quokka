@@ -2,7 +2,7 @@ use std::num::NonZero;
 
 use wgpu::util::DeviceExt;
 
-use crate::renderer::{PerFrameData, VolumeRenderer};
+use crate::renderer::{FrameBuffer, PerFrameData, VolumeRenderer};
 use crate::{camera::OrthographicCamera, renderer::CameraUniform};
 
 pub struct SSAO {
@@ -15,8 +15,7 @@ pub struct SSAO {
 
 impl SSAO {
     pub fn new(
-        device: &wgpu::Device,
-        target_format: wgpu::TextureFormat, // outgoing target texture format
+        device: &wgpu::Device
     ) -> Self {
         let shader = device.create_shader_module(wgpu::include_wgsl!("shaders/ssao.wgsl"));
 
@@ -113,19 +112,8 @@ impl SSAO {
                 module: &shader,
                 entry_point: "blur_hor_frag",
                 targets: &[Some(wgpu::ColorTargetState {
-                    format: target_format,
-                    blend: Some(wgpu::BlendState {
-                        color: wgpu::BlendComponent {
-                            src_factor: wgpu::BlendFactor::Zero,
-                            dst_factor: wgpu::BlendFactor::SrcAlpha,
-                            operation: wgpu::BlendOperation::Add,
-                        },
-                        alpha: wgpu::BlendComponent {
-                            src_factor: wgpu::BlendFactor::Zero,
-                            dst_factor: wgpu::BlendFactor::One,
-                            operation: wgpu::BlendOperation::Add,
-                        },
-                    }),
+                    format: wgpu::TextureFormat::R8Unorm,
+                    blend: None,
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
                 compilation_options: Default::default(),
@@ -203,9 +191,8 @@ impl SSAO {
         &self,
         encoder: &'a mut wgpu::CommandEncoder,
         device: &wgpu::Device,
-        textures: &SSAOTextures,
+        frame_buffer: &FrameBuffer,
         camera: &OrthographicCamera,
-        target_texture: &wgpu::TextureView,
         frame_data: &PerFrameData,
     ) {
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -220,7 +207,7 @@ impl SSAO {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&textures.normal_depth),
+                    resource: wgpu::BindingResource::TextureView(&frame_buffer.normal_depth_view),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -237,7 +224,7 @@ impl SSAO {
             let mut ssao_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("ssao render pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &textures.ssao,
+                    view: &frame_buffer.ssao_view,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Load,
@@ -264,7 +251,7 @@ impl SSAO {
                 entries: &[
                     wgpu::BindGroupEntry {
                         binding: 0,
-                        resource: wgpu::BindingResource::TextureView(&textures.ssao),
+                        resource: wgpu::BindingResource::TextureView(&frame_buffer.ssao_view),
                     },
                     wgpu::BindGroupEntry {
                         binding: 1,
@@ -279,7 +266,7 @@ impl SSAO {
             let mut blur_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("ssao render pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &textures.blur,
+                    view: &frame_buffer.blur_view,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Load,
@@ -303,7 +290,7 @@ impl SSAO {
                 entries: &[
                     wgpu::BindGroupEntry {
                         binding: 0,
-                        resource: wgpu::BindingResource::TextureView(&textures.blur),
+                        resource: wgpu::BindingResource::TextureView(&frame_buffer.blur_view),
                     },
                     wgpu::BindGroupEntry {
                         binding: 1,
@@ -318,7 +305,7 @@ impl SSAO {
             let mut blur_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("ssao render pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: target_texture,
+                    view: &frame_buffer.ssao_view,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Load,
@@ -337,63 +324,3 @@ impl SSAO {
     }
 }
 
-pub struct SSAOTextures {
-    pub normal_depth: wgpu::TextureView,
-    pub ssao: wgpu::TextureView,
-    pub blur: wgpu::TextureView,
-}
-
-impl SSAOTextures {
-    pub fn new(device: &wgpu::Device, width: u32, height: u32) -> Self {
-        let normal_depth_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("normal and depth texture"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba16Float,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
-
-        let ssoa_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("ssao texture"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::R8Unorm,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
-
-        let blur_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("blur texture"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::R8Unorm,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
-
-        return Self {
-            normal_depth: normal_depth_texture.create_view(&Default::default()),
-            ssao: ssoa_texture.create_view(&Default::default()),
-            blur: blur_texture.create_view(&Default::default()),
-        };
-    }
-}
