@@ -1,0 +1,21 @@
+accepted = [
+    "Apache-2.0",
+    "MIT",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "Unicode-DFS-2016",
+    "Apache-2.0",
+    "Zlib",
+    "ISC",
+    "CC0-1.0",
+    "OFL-1.1",
+    "Apache-2.0 WITH LLVM-exception",
+    "LicenseRef-UFL-1.0",
+]
+
+[nifti.clarify]
+license = "MIT OR Apache-2.0"
+
+[[nifti.clarify.files]]
+path="LICENSE-MIT"
+checksum="f65bafe631b3be0091a731caf801eb11f690ff022ae629b5cfc24a7409ace040"
