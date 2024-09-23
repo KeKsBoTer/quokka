@@ -1,7 +1,7 @@
 [project]
 name = "quokka"
 version = "0.2.2"
-description = "Volume 4D Visualization"
+description = "Volume Visualization"
 readme = "README.md"
 requires-python = ">=3.8"
 keywords = ["4D", "volume", "visualization", "quokka"]

@@ -3,8 +3,9 @@ use image::{ImageBuffer, Rgba};
 
 use crate::{
     camera::{Camera, OrthographicProjection, Projection},
-    cmap::{ColorMapGPU, GenericColorMap, COLORMAP_RESOLUTION},
-    renderer::{DVRSettings, RenderSettings, RenderState, VolumeRenderer},
+    cmap::{ColorMapGPU, LinearSegmentedColorMap, COLORMAP_RESOLUTION},
+    presets::Preset,
+    renderer::{Display, FrameBuffer, RenderState, VolumeRenderer},
     volume::{Volume, VolumeGPU},
     WGPUContext,
 };
@@ -17,9 +18,9 @@ async fn render_view<P: Projection>(
     cmap: &ColorMapGPU,
     camera: Camera<P>,
     render_settings: &RenderState,
-    bg: wgpu::Color,
     resolution: Vector2<u32>,
 ) -> anyhow::Result<ImageBuffer<Rgba<u8>, Vec<u8>>> {
+    let target_format = wgpu::TextureFormat::Rgba8Unorm;
     let target = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("render texture"),
         size: wgpu::Extent3d {
@@ -30,33 +31,34 @@ async fn render_view<P: Projection>(
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        format: renderer.format(),
+        format: target_format,
         usage: wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::RENDER_ATTACHMENT,
         view_formats: &[],
     });
+    let target_view = target.create_view(&Default::default());
 
-    let target_view = target.create_view(&wgpu::TextureViewDescriptor::default());
+    let display = Display::new(device, target_format);
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("render encoder"),
     });
+    let frame_buffer = FrameBuffer::new(&device, resolution, renderer.format());
     let frame_data = renderer.prepare(device, volume, &camera, &render_settings, cmap);
+    renderer.render(&mut encoder, &frame_data, &frame_buffer);
     {
         let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("render pass"),
+            label: Some("display render pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view: &target_view,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(bg),
+                    load: wgpu::LoadOp::Load,
                     store: wgpu::StoreOp::Store,
                 },
             })],
-            depth_stencil_attachment: None,
-            timestamp_writes: None,
-            occlusion_query_set: None,
+            ..Default::default()
         });
-        renderer.render(&mut render_pass, &frame_data);
+        display.render(&mut render_pass, &frame_buffer, &frame_data);
     }
     queue.submit(std::iter::once(encoder.finish()));
     let img = download_texture(&target, device, queue).await;
@@ -65,15 +67,9 @@ async fn render_view<P: Projection>(
 
 pub async fn render_volume(
     volumes: Vec<Volume>,
-    cmap: GenericColorMap,
     resolution: Vector2<u32>,
     frames: &[f32],
-    bg: wgpu::Color,
-    vmin: Option<f32>,
-    vmax: Option<f32>,
-    distance_scale: f32,
-    spatial_interpolation: wgpu::FilterMode,
-    temporal_interpolation: wgpu::FilterMode,
+    preset: Preset,
 ) -> anyhow::Result<Vec<ImageBuffer<Rgba<u8>, Vec<u8>>>> {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
     let wgpu_context = WGPUContext::new(&instance, None).await;
@@ -85,6 +81,16 @@ pub async fn render_volume(
         .into_iter()
         .map(|v| VolumeGPU::new(device, queue, v))
         .collect();
+
+    let cmap = match preset.cmap {
+        Some(cmap) => cmap,
+        None => if !preset.render_settings.dvr.enabled {
+            LinearSegmentedColorMap::empty()
+        } else {
+            return Err(anyhow::anyhow!("No color map provided"))
+        },
+    };
+
     let cmap_gpu = ColorMapGPU::new(&cmap, device, queue, COLORMAP_RESOLUTION);
 
     let render_format = wgpu::TextureFormat::Rgba8UnormSrgb;
@@ -93,10 +99,14 @@ pub async fn render_volume(
 
     let ratio = resolution.x as f32 / resolution.y as f32;
     let radius = aabb.radius();
-    let camera = Camera::new_aabb_iso(
+
+    let mut camera = Camera::new_aabb_iso(
         aabb,
         OrthographicProjection::new(Vector2::new(ratio, 1.) * radius * 2., 0.01, 1000.),
+        preset.camera,
     );
+
+    camera.fit_near_far(&volume_gpu[0].volume.aabb);
 
     let mut images: Vec<ImageBuffer<Rgba<u8>, Vec<u8>>> = Vec::with_capacity(frames.len());
     for time in frames {
@@ -109,21 +119,10 @@ pub async fn render_volume(
             camera,
             &RenderState {
                 time: *time,
-                settings: RenderSettings {
-                    dvr: DVRSettings {
-                        vmin,
-                        vmax,
-                        distance_scale: distance_scale,
-                        ..Default::default()
-                    },
-                    spatial_filter: spatial_interpolation,
-                    temporal_filter: temporal_interpolation,
-                    ..Default::default()
-                },
+                settings: preset.render_settings.clone(),
                 gamma_correction: !render_format.is_srgb(),
                 step_size: 1e-4,
             },
-            bg,
             resolution,
         )
         .await?;

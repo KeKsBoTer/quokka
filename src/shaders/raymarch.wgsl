@@ -46,6 +46,7 @@ struct Settings {
 
     iso_threshold: f32,
     step_size:f32,
+    near_clip_plane:f32,
 }
 
 
@@ -83,6 +84,8 @@ fn create_ray(view_inv: mat4x4<f32>, proj_inv: mat4x4<f32>, px: vec2<f32>) -> Ra
     // depth prepass location
     var near_w = view_inv * proj_inv * near;
     near_w /= near_w.w + 1e-6;
+
+    near_w = near_w + (far_w- near_w)*settings.near_clip_plane;
 
     return Ray(
         near_w.xyz,

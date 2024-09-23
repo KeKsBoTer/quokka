@@ -1,4 +1,5 @@
 use cgmath::*;
+use half::vec;
 
 use crate::volume::Aabb;
 
@@ -20,12 +21,12 @@ impl<P: Projection> Camera<P> {
         }
     }
 
-    pub fn new_aabb_iso(aabb: Aabb<f32>, projection: P) -> Self {
+    pub fn new_aabb_iso(aabb: Aabb<f32>, projection: P, cam_pos: Option<Point3<f32>>) -> Self {
         let r = aabb.radius();
-        let corner = vec3(1., 1., 1.);
+        let corner = cam_pos.map(|v|v.to_vec()).unwrap_or(Vector3::new(1., 1., 1.).normalize()*2.8);
         let view_dir = Quaternion::look_at(-corner, Vector3::unit_y());
         Camera::new(
-            aabb.center() + corner.normalize() * r * 2.8,
+            aabb.center() + corner*r,
             view_dir,
             projection,
         )
@@ -155,6 +156,7 @@ impl OrthographicProjection {
             self.viewport.y = self.viewport.x / ratio;
         }
     }
+
 }
 
 impl Projection for OrthographicProjection {
@@ -191,25 +193,20 @@ fn hessian_plane(p: Vector4<f32>) -> Vector4<f32> {
     return p / l;
 }
 
-impl std::hash::Hash for OrthographicProjection {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.znear.to_bits().hash(state);
-        self.zfar.to_bits().hash(state);
-        self.viewport.x.to_bits().hash(state);
-        self.viewport.y.to_bits().hash(state);
-    }
+impl OrthographicCamera{
+
+    pub fn fit_near_far(&mut self,aabb:&Aabb<f32>){
+        // find the distance from the camera to the aabb center in camera z direction
+        let h: Vector3<f32> = aabb.center() - self.position;
+        let c = self.view_direction();
+        let a = h.angle(c).cos()*h.magnitude();
+
+        let min_near = (a-aabb.radius()).max(1e-4);
+        let max_far = a+aabb.radius();
+        
+
+        // workaround until clamp_to_range works with sliders agai
+        self.projection.znear = min_near;
+        self.projection.zfar = max_far;
 }
-
-impl std::hash::Hash for OrthographicCamera {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.position.x.to_bits().hash(state);
-        self.position.y.to_bits().hash(state);
-        self.position.z.to_bits().hash(state);
-
-        self.rotation.s.to_bits().hash(state);
-        self.rotation.v.x.to_bits().hash(state);
-        self.rotation.v.y.to_bits().hash(state);
-        self.rotation.v.z.to_bits().hash(state);
-        self.projection.hash(state);
-    }
 }

@@ -36,6 +36,7 @@ struct Settings {
 
     iso_threshold: f32,
     step_size:f32,
+    near_clip_plane:f32,
 }
 
 

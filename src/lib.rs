@@ -6,7 +6,6 @@ use image::ImageReader;
 use renderer::{Display, FrameBuffer, IsoSettings, RenderSettings, RenderState, VolumeRenderer};
 use std::{
     collections::HashMap,
-    hash::{DefaultHasher, Hash, Hasher},
     io::Cursor,
     path::PathBuf,
     sync::Arc,
@@ -135,8 +134,6 @@ pub struct WindowContext {
 
     show_box: bool,
 
-    last_state_hash: u64,
-
     presets: HashMap<String, Preset>,
     selected_preset: Option<String>,
 }
@@ -253,6 +250,7 @@ impl WindowContext {
         let camera = Camera::new_aabb_iso(
             volume.aabb.clone(),
             OrthographicProjection::new(Vector2::new(ratio, 1.) * 2. * radius, 1e-4, 100.),
+            None,
         );
 
         let animation_duration = render_config
@@ -273,7 +271,7 @@ impl WindowContext {
 
         let display = Display::new(device, surface_format);
 
-        Ok(Self {
+        let mut me = Self {
             wgpu_context,
             scale_factor: window.scale_factor() as f32,
             window,
@@ -298,12 +296,42 @@ impl WindowContext {
             cmap_select_visible: render_config.show_cmap_select,
             ssao,
             show_box: false,
-            last_state_hash: 0,
             presets,
             selected_preset,
             frame_buffer,
             display,
-        })
+        };
+
+        if let Some(preset) = render_config.preset.as_ref() {
+            me.set_preset(preset.clone());
+        }
+
+        Ok(me)
+    }
+
+    pub(crate) fn set_preset(&mut self, preset: Preset) {
+        self.render_state.settings = preset.render_settings;
+        self.selected_preset = Some(preset.name);
+        if let Some(cmap) = preset.cmap {
+            self.cmap = cmap;
+            self.cmap_gpu = ColorMapGPU::new(
+                &self.cmap,
+                &self.wgpu_context.device,
+                &self.wgpu_context.queue,
+                COLORMAP_RESOLUTION,
+            );
+        }
+        if let Some(camera) = preset.camera {
+            let aabb = self.volume.volume.aabb.clone();
+            self.controller.center = aabb.center();
+
+            self.camera = Camera::new_aabb_iso(
+                aabb,
+                self.camera.projection.clone(),
+                Some(camera),
+            );
+            self.controller.reset();
+        }
     }
 
     fn load_file(&mut self, path: &PathBuf) -> anyhow::Result<()> {
@@ -343,24 +371,24 @@ impl WindowContext {
 
     /// returns whether redraw is required
     fn update(&mut self, dt: Duration) -> bool {
+        let old_settings = self.render_state.clone();
         let old_camera = self.camera.clone();
         self.controller.update_camera(&mut self.camera, dt);
         if !self.camera.visible(self.volume.volume.aabb) {
             self.camera = old_camera;
         }
 
+        let volume_aabb = self.volume.volume.aabb;
+
+        self.camera.fit_near_far(&volume_aabb);
+
+
         if self.playing && self.volume.volume.timesteps() > 1 {
             self.render_state.time += dt.as_secs_f32() / self.animation_duration.as_secs_f32();
             self.render_state.time = self.render_state.time.fract();
         }
 
-        let mut hasher = DefaultHasher::new();
-        self.camera.hash(&mut hasher);
-        self.render_state.hash(&mut hasher);
-        let hash = hasher.finish();
-
-        let request_redraw = self.last_state_hash != hash;
-        self.last_state_hash = hash;
+        let request_redraw = old_settings != self.render_state;
         return request_redraw;
     }
 
@@ -422,39 +450,8 @@ impl WindowContext {
             &self.cmap_gpu,
         );
 
-        {
-            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("render pass"),
-                color_attachments: &[
-                    Some(wgpu::RenderPassColorAttachment {
-                        view: &self.frame_buffer.color_dvr_view,
-                        resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Load,
-                            store: wgpu::StoreOp::Store,
-                        },
-                    }),
-                    Some(wgpu::RenderPassColorAttachment {
-                        view: &self.frame_buffer.color_iso_view,
-                        resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Load,
-                            store: wgpu::StoreOp::Store,
-                        },
-                    }),
-                    Some(wgpu::RenderPassColorAttachment {
-                        view: &self.frame_buffer.normal_depth_view,
-                        resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Load,
-                            store: wgpu::StoreOp::Store,
-                        },
-                    }),
-                ],
-                ..Default::default()
-            });
-            self.renderer.render(&mut render_pass, &frame_data);
-        }
+        self.renderer
+            .render(&mut encoder, &frame_data, &self.frame_buffer);
 
         if self.render_state.settings.iso_surface.enabled && self.render_state.settings.ssao.enabled
         {

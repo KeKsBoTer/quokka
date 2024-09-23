@@ -1,9 +1,13 @@
-use std::{collections::HashMap, hash::Hasher, io::Cursor};
+use std::{collections::HashMap, io::Cursor};
 
+use cgmath::Point3;
+use cgmath::Quaternion;
 use include_dir::include_dir;
 use include_dir::Dir;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "python")]
+use pyo3::{prelude::*,exceptions::PyTypeError};
 
 use crate::{cmap::LinearSegmentedColorMap, renderer::RenderSettings};
 
@@ -37,10 +41,12 @@ pub static PRESETS: once_cell::sync::Lazy<HashMap<String, Preset>> =
     Lazy::new(|| load_presets(&PRESETS_FOLDER));
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "python", pyo3::pyclass)]
 pub struct Preset {
     pub name: String,
     pub render_settings: RenderSettings,
     pub cmap: Option<LinearSegmentedColorMap>,
+    pub camera:Option<Point3<f32>>
 }
 
 impl Preset {
@@ -49,12 +55,31 @@ impl Preset {
     }
 }
 
-impl std::hash::Hash for Preset {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.render_settings.hash(state);
-        self.cmap.hash(state);
+// work until https://github.com/PyO3/pyo3/issues/1003 is fixed
+#[cfg(feature = "python")]
+#[pymethods]
+impl Preset {
+
+    #[new]
+    fn __new__(
+        name: String,
+        render_settings: RenderSettings,
+        cmap: Option<LinearSegmentedColorMap>,
+        camera: Option<(f32,f32,f32)>,
+    ) -> Self {
+        Preset {
+            name,
+            render_settings,
+            cmap,
+            camera: camera.map(|(x,y,z)| Point3::new(x,y,z))
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        format!("{:?}", self)
     }
 }
+
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Presets(pub HashMap<String, Preset>);

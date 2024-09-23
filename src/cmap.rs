@@ -13,6 +13,8 @@ use include_dir::Dir;
 use npyz::WriterBuilder;
 #[cfg(feature = "python")]
 use numpy::ndarray::{ArrayViewD, Axis};
+#[cfg(feature = "python")]
+use pyo3::{pymethods, PyResult};
 use wgpu::{util::DeviceExt, Extent3d};
 
 #[cfg(feature = "colormaps")]
@@ -286,14 +288,19 @@ impl ColorMapGPU {
 }
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize, PartialEq)]
+#[cfg_attr(feature = "python", pyo3::pyclass)]
+
 pub struct LinearSegmentedColorMap {
     /// x, y0,y1
     #[serde(alias = "red")]
     pub r: Vec<(f32, f32, f32)>,
+
     #[serde(alias = "green")]
     pub g: Vec<(f32, f32, f32)>,
+
     #[serde(alias = "blue")]
     pub b: Vec<(f32, f32, f32)>,
+
     #[serde(alias = "alpha")]
     pub a: Option<Vec<(f32, f32, f32)>>,
 }
@@ -347,6 +354,7 @@ impl LinearSegmentedColorMap {
         }
         return true;
     }
+
     pub fn from_color_map(cmap: impl ColorMap, n: u32) -> Self {
         let mut r = vec![];
         let mut g = vec![];
@@ -373,7 +381,37 @@ impl LinearSegmentedColorMap {
             a: Some(a),
         }
     }
+
+    pub fn empty() -> Self {
+        Self::new(
+            vec![(0., 0., 0.), (1., 0., 0.)],
+            vec![(0., 0., 0.), (1., 0., 0.)],
+            vec![(0., 0., 0.), (1., 0., 0.)],
+            None,
+        ).unwrap()
+    }
 }
+
+
+#[cfg(feature = "python")]
+#[pymethods]
+impl LinearSegmentedColorMap {
+    #[new]
+    fn __new__(
+        r: Vec<(f32, f32, f32)>,
+        g: Vec<(f32, f32, f32)>,
+        b: Vec<(f32, f32, f32)>,
+        a: Option<Vec<(f32, f32, f32)>>,
+    ) -> PyResult<Self> {
+
+        Self::new(r, g, b, a).map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
+    }
+
+    fn __repr__(&self) -> String {
+        format!("{:?}", self)
+    }
+}
+
 
 impl ColorMap for &LinearSegmentedColorMap {
     type Item = LinearSegmentedColorMap;

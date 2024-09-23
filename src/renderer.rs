@@ -1,4 +1,4 @@
-use std::hash::Hasher;
+use std::fmt::Debug;
 
 use crate::{
     camera::{Camera, Projection},
@@ -6,7 +6,10 @@ use crate::{
     volume::{Volume, VolumeGPU},
 };
 
-use cgmath::{Array, EuclideanSpace, Matrix4, SquareMatrix, Vector2, Vector3, Vector4, Zero};
+use cgmath::{EuclideanSpace, Matrix4, SquareMatrix, Vector2, Vector3, Vector4, Zero};
+#[cfg(feature = "python")]
+use pyo3::pymethods;
+use pyo3::{exceptions::PyValueError, PyResult};
 use serde::{Deserialize, Serialize};
 use wgpu::util::DeviceExt;
 
@@ -169,11 +172,43 @@ impl VolumeRenderer {
         }
     }
 
-    pub fn render<'rpass>(
-        &'rpass self,
-        render_pass: &mut wgpu::RenderPass<'rpass>,
-        frame_data: &'rpass PerFrameData,
+    pub fn render(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        frame_data: &PerFrameData,
+        frame_buffer: &FrameBuffer,
     ) {
+        let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("render pass"),
+            color_attachments: &[
+                Some(wgpu::RenderPassColorAttachment {
+                    view: &frame_buffer.color_dvr_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                }),
+                Some(wgpu::RenderPassColorAttachment {
+                    view: &frame_buffer.color_iso_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                }),
+                Some(wgpu::RenderPassColorAttachment {
+                    view: &frame_buffer.normal_depth_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                }),
+            ],
+            ..Default::default()
+        });
+
         render_pass.set_bind_group(0, &frame_data.bind_group, &[]);
         render_pass.set_bind_group(1, frame_data.cmap_bind_group, &[]);
         render_pass.set_pipeline(&self.pipeline);
@@ -295,6 +330,7 @@ impl<P: Projection> From<&Camera<P>> for CameraUniform {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct RenderState {
     pub time: f32,
     pub settings: RenderSettings,
@@ -303,16 +339,8 @@ pub struct RenderState {
     pub step_size: f32,
 }
 
-impl std::hash::Hash for RenderState {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.time.to_bits().hash(state);
-        self.settings.hash(state);
-        self.gamma_correction.hash(state);
-        self.step_size.to_bits().hash(state);
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "python", pyo3::pyclass)]
 pub struct DVRSettings {
     pub enabled: bool,
     /// The minimum value used to map the volume data to the transfer function.
@@ -322,6 +350,24 @@ pub struct DVRSettings {
     pub vmax: Option<f32>,
 
     pub distance_scale: f32,
+}
+
+#[cfg(feature = "python")]
+#[pymethods]
+impl DVRSettings {
+    #[new]
+    fn __new__(enabled: bool, distance_scale: f32, vmin: Option<f32>, vmax: Option<f32>) -> Self {
+        Self {
+            enabled,
+            vmin,
+            vmax,
+            distance_scale,
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        format!("{:?}", self)
+    }
 }
 
 impl Default for DVRSettings {
@@ -334,17 +380,8 @@ impl Default for DVRSettings {
         }
     }
 }
-
-impl std::hash::Hash for DVRSettings {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.enabled.hash(state);
-        self.vmin.map(|v| v.to_bits()).hash(state);
-        self.vmax.map(|v| v.to_bits()).hash(state);
-        self.distance_scale.to_bits().hash(state);
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "python", pyo3::pyclass)]
 pub struct IsoSettings {
     pub enabled: bool,
     /// Indicates whether to use cube surface as normals.
@@ -384,21 +421,39 @@ impl Default for IsoSettings {
     }
 }
 
-impl std::hash::Hash for IsoSettings {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.enabled.hash(state);
-        self.use_cube_surface_grad.hash(state);
-        self.shininess.to_bits().hash(state);
-        self.threshold.to_bits().hash(state);
+#[cfg(feature = "python")]
+#[pymethods]
+impl IsoSettings {
+    #[new]
+    fn __new__(
+        enabled: bool,
+        use_cube_surface_grad: bool,
+        shininess: f32,
+        threshold: f32,
+        ambient_color: [f32; 3],
+        specular_color: [f32; 3],
+        light_color: [f32; 3],
+        diffuse_color: [f32; 4],
+    ) -> Self {
+        Self {
+            enabled,
+            threshold,
+            diffuse_color: Vector4::from(diffuse_color),
+            ambient_color: Vector3::from(ambient_color),
+            specular_color: Vector3::from(specular_color),
+            light_color: Vector3::from(light_color),
+            shininess,
+            use_cube_surface_grad,
+        }
+    }
 
-        array_hash(self.ambient_color, state);
-        array_hash(self.specular_color, state);
-        array_hash(self.light_color, state);
-        array_hash(self.diffuse_color, state);
+    fn __repr__(&self) -> String {
+        format!("{:?}", self)
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "python", pyo3::pyclass)]
 pub struct SSAOSettings {
     pub enabled: bool,
     /// The radius value used for SSAO.
@@ -422,16 +477,34 @@ impl Default for SSAOSettings {
     }
 }
 
-impl std::hash::Hash for SSAOSettings {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.enabled.hash(state);
-        self.radius.to_bits().hash(state);
-        self.bias.to_bits().hash(state);
-        self.kernel_size.hash(state);
+#[cfg(feature = "python")]
+#[pymethods]
+impl SSAOSettings {
+
+    #[new]
+    fn __new__(
+        enabled: bool,
+        radius: f32,
+        bias: f32,
+        kernel_size: u32,
+    ) -> Self {
+        Self {
+            enabled,
+            radius,
+            bias,
+            kernel_size,
+        }
+    }
+
+
+    fn __repr__(&self) -> String {
+        format!("{:?}", self)
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "python", pyo3::pyclass(dict, mapping))]
+
 /// Render settings for the renderer module.
 pub struct RenderSettings {
     /// The spatial filter mode used for rendering.
@@ -446,19 +519,53 @@ pub struct RenderSettings {
 
     /// The background color used for rendering.
     pub background_color: wgpu::Color,
+
+    pub near_clip_plane: Option<f32>,
 }
 
-impl std::hash::Hash for RenderSettings {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.spatial_filter.hash(state);
-        self.temporal_filter.hash(state);
-        self.dvr.hash(state);
-        self.iso_surface.hash(state);
-        self.ssao.hash(state);
-        self.background_color.r.to_bits().hash(state);
-        self.background_color.g.to_bits().hash(state);
-        self.background_color.b.to_bits().hash(state);
-        self.background_color.a.to_bits().hash(state);
+#[cfg(feature = "python")]
+#[pymethods]
+impl RenderSettings {
+    #[new]
+    fn __new__(
+        spatial_filer:String,
+        temporal_filter:String,
+        dvr: DVRSettings,
+        iso: IsoSettings,
+        ssao: SSAOSettings,
+        background_color: [f64; 4],
+        near_clip_plane: Option<f32>,
+    ) -> PyResult<Self> {
+
+        let spatial_filter = str_to_filter_mode(&spatial_filer).map_err(|e|PyValueError::new_err(e.to_string()))?;
+        let temporal_filter = str_to_filter_mode(&temporal_filter).map_err(|e|PyValueError::new_err(e.to_string()))?;
+
+        Ok(Self {
+            dvr: dvr,
+            iso_surface: iso,
+            ssao: ssao,
+            spatial_filter,
+            temporal_filter,
+            near_clip_plane,
+            background_color: wgpu::Color {
+                r: background_color[0],
+                g: background_color[1],
+                b: background_color[2],
+                a: background_color[3],
+            },
+        })
+    }
+
+    fn __repr__(&self) -> String {
+        format!("{:?}", self)
+    }
+}
+
+fn str_to_filter_mode(name:&str)->anyhow::Result<wgpu::FilterMode>{
+    match name.to_lowercase().as_str(){
+        "nearest"=>Ok(wgpu::FilterMode::Nearest),
+        "linear"=>Ok(wgpu::FilterMode::Linear),
+        _=>Err(anyhow::anyhow!("Invalid filter mode '{:}'",name))
     }
 }
 
@@ -471,6 +578,7 @@ impl Default for RenderSettings {
             dvr: DVRSettings::default(),
             iso_surface: IsoSettings::default(),
             ssao: SSAOSettings::default(),
+            near_clip_plane: None,
         }
     }
 }
@@ -501,17 +609,17 @@ pub struct RenderSettingsUniform {
     use_cube_surface_grad: u32,
     iso_shininess: f32,
 
-    ssao_enabled:u32,
+    ssao_enabled: u32,
     ssao_radius: f32,
     ssao_bias: f32,
     ssao_kernel_size: u32,
-
 
     background_color: Vector4<f32>,
 
     iso_threshold: f32,
     step_size: f32,
-    _pad: [u32; 2],
+    near_clip_plane: f32,
+    _pad: [u32; 1],
 }
 impl RenderSettingsUniform {
     pub fn from_settings(state: &RenderState, volume: &Volume) -> Self {
@@ -552,7 +660,8 @@ impl RenderSettingsUniform {
                 state.settings.background_color.a as f32,
             ),
             ssao_enabled: ssao_settings.enabled as u32,
-            _pad: [0;2],
+            near_clip_plane: state.settings.near_clip_plane.unwrap_or(0.),
+            _pad: [0; 1],
         }
     }
 }
@@ -587,19 +696,9 @@ impl Default for RenderSettingsUniform {
             ssao_kernel_size: 64,
             background_color: Vector4::new(0., 0., 0., 1.),
             ssao_enabled: 1,
-            _pad: [0; 2],
+            near_clip_plane: 0.,
+            _pad: [0; 1],
         }
-    }
-}
-
-use std::hash::Hash;
-fn array_hash<A, H>(v: A, hasher: &mut H)
-where
-    A: Array<Element = f32>,
-    H: Hasher,
-{
-    for i in 0..A::len() {
-        v[i].to_bits().hash(hasher);
     }
 }
 
@@ -781,10 +880,7 @@ impl FrameBuffer {
 pub struct Display(wgpu::RenderPipeline);
 
 impl Display {
-    pub fn new(
-        device: &wgpu::Device,
-        target_format: wgpu::TextureFormat,
-    ) -> Self {
+    pub fn new(device: &wgpu::Device, target_format: wgpu::TextureFormat) -> Self {
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("display pipeline layout"),
             bind_group_layouts: &[
@@ -831,7 +927,6 @@ impl Display {
 
         Self(pipeline)
     }
-
 
     pub fn render<'rpass>(
         &'rpass self,

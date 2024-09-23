@@ -18,6 +18,9 @@ use crate::cmap::COLORMAPS;
 pub(crate) fn ui(state: &mut WindowContext) -> bool {
     let ctx = state.ui_renderer.winit.egui_ctx();
     let with_animation = state.volume.volume.timesteps() > 1;
+
+    let mut new_preset = None;
+
     egui::Window::new("Render Settings").fade_in(true).show(ctx, |ui| {
         egui::Grid::new("render_settings")
             .num_columns(2)
@@ -80,31 +83,18 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
 
                 ui.end_row();
                 ui.label("Near Clip Plane");
-                let volume_aabb = state.volume.volume.aabb;
 
-                // find the distance from the camera to the aabb center in camera z direction
-                let h = volume_aabb.center() - state.camera.position;
-                let c = state.camera.view_direction();
-                let a = h.angle(c).cos()*h.magnitude();
-
-                let min_near = a-volume_aabb.radius();
-                let max_far = a+volume_aabb.radius();
-                let max_near = state.camera.projection.zfar;
-                let min_far = state.camera.projection.znear;
+                let mut near_clip_plane = state.render_state.settings.near_clip_plane.unwrap_or(0.);
                 
-                ui.add(egui::Slider::new(&mut state.camera.projection.znear, min_near..=max_near).clamp_to_range(true).fixed_decimals(3));
+                ui.add(egui::Slider::new(&mut near_clip_plane, (0.)..=1.).clamp_to_range(true).fixed_decimals(3));
                 ui.end_row();
 
-                // ui.label("Far Clip Plane");
-                // ui.add(egui::Slider::new(&mut state.camera.projection.zfar, min_far..=max_far).clamp_to_range(true));
-
-                // workaround until clamp_to_range works with sliders agai
-                state.camera.projection.znear = state.camera.projection.znear.clamp(min_near,max_near );
-                state.camera.projection.zfar = state.camera.projection.zfar.clamp(min_far,max_far);
+                if near_clip_plane != state.render_state.settings.near_clip_plane.unwrap_or(0.){
+                    state.render_state.settings.near_clip_plane = Some(near_clip_plane);
+                }
 
                 ui.end_row();
             });
-
         CollapsingHeader::new("Presets").show_unindented(ui, |ui| {
             egui::Grid::new("presets grid").max_col_width(100.).num_columns(2).show(ui,|ui|{
             if state.presets.len() > 0{
@@ -118,12 +108,8 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
                                     false,
                                     p.name.clone(),
                                 ).clicked(){
-                                    state.render_state.settings = p.render_settings.clone();
-                                    state.selected_preset = Some(name.clone());
-                                    if let Some(cmap) = &p.cmap{
-                                        state.cmap = cmap.clone();
-                                    }
-                                    log::info!("Loaded preset {}", p.name);
+                                    new_preset = Some(p.clone());
+                                    log::info!("Loaded preset {}", name);
                                 }
                             }
                         });
@@ -153,6 +139,7 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
                         name: file_name.clone(),
                         render_settings: state.render_state.settings.clone(),
                         cmap: state.render_state.settings.dvr.enabled.then_some(state.cmap.clone()),
+                        camera: Some(state.camera.position),
                     };
                     serde_json::to_writer_pretty(file, &preset).unwrap();
                     log::info!("Saved present to {}", file_name);
@@ -166,6 +153,7 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
                             name: file_name.clone(),
                             render_settings: state.render_state.settings.clone(),
                             cmap: state.render_state.settings.dvr.enabled.then_some(state.cmap.clone()),
+                            camera: Some(state.camera.position),
                         };
                         local_presets.0.insert(file_name.clone(), new_preset.clone());
                         local_storage().unwrap().set_item("presets", &serde_json::to_string(&local_presets).unwrap()).unwrap();
@@ -671,10 +659,16 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
     //     }
     // }
 
-    return ctx.has_requested_repaint();
+    let repaint = ctx.has_requested_repaint();
+
+    if let Some(preset) = new_preset {
+        state.set_preset(preset);
+    }
+
+    return repaint;
 }
 
-use cgmath::{Angle, InnerSpace, Transform, Vector3, Vector4};
+use cgmath::{Transform, Vector3, Vector4};
 use egui::{epaint::PathShape, *};
 
 pub fn tf_ui(ui: &mut Ui, points: &mut Vec<(f32, f32, f32)>) -> egui::Response {

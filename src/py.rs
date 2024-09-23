@@ -5,12 +5,7 @@ use numpy::{ndarray::StrideShape, IntoPyArray, PyArray4, PyReadonlyArrayDyn};
 use pyo3::prelude::*;
 use std::env::{self};
 
-use crate::{
-    cmap::{self, ListedColorMap},
-    offline::render_volume,
-    viewer,
-    volume::Volume,
-};
+use crate::{cmap::LinearSegmentedColorMap, offline::render_volume, presets::Preset, renderer::{DVRSettings, IsoSettings, RenderSettings, SSAOSettings}, viewer, volume::Volume};
 
 #[pymodule]
 fn quokka<'py>(m: &Bound<'py, PyModule>) -> PyResult<()> {
@@ -18,39 +13,17 @@ fn quokka<'py>(m: &Bound<'py, PyModule>) -> PyResult<()> {
     fn render_video<'py>(
         py: Python<'py>,
         volume: PyReadonlyArrayDyn<'py, f16>,
-        cmap: PyReadonlyArrayDyn<'py, f32>,
         width: u32,
         height: u32,
         time: Vec<f32>,
-        background: (f32, f32, f32, f32),
-        distance_scale: f32,
-        vmin: Option<f32>,
-        vmax: Option<f32>,
-        spatial_interpolation: Option<String>,
-        temporal_interpolation: Option<String>,
+        preset: Preset,
     ) -> Bound<'py, PyArray4<u8>> {
         let volume = Volume::from_array(volume.as_array().to_owned()).expect("cannot read array");
-        let cmap = ListedColorMap::from_array(cmap.as_array());
         let img: Vec<ImageBuffer<Rgba<u8>, Vec<u8>>> = pollster::block_on(render_volume(
             vec![volume],
-            cmap::GenericColorMap::Listed(cmap),
             Vector2::new(width, height),
             &time,
-            wgpu::Color {
-                r: background.0 as f64,
-                g: background.1 as f64,
-                b: background.2 as f64,
-                a: background.3 as f64,
-            },
-            vmin,
-            vmax,
-            distance_scale,
-            spatial_interpolation
-                .map(|s| parse_interpolation(&s).unwrap())
-                .unwrap_or_default(),
-            temporal_interpolation
-                .map(|s| parse_interpolation(&s).unwrap())
-                .unwrap_or_default(),
+            preset,
         ))
         .unwrap();
 
@@ -74,13 +47,13 @@ fn quokka<'py>(m: &Bound<'py, PyModule>) -> PyResult<()> {
             ))),
         }
     }
-    Ok(())
-}
 
-fn parse_interpolation(text: &str) -> anyhow::Result<wgpu::FilterMode> {
-    match text.to_lowercase().as_str() {
-        "nearest" => Ok(wgpu::FilterMode::Nearest),
-        "linear" => Ok(wgpu::FilterMode::Linear),
-        _ => Err(anyhow::format_err!("Invalid interpolation mode")),
-    }
+    m.add_class::<Preset>()?;
+    m.add_class::<RenderSettings>()?;
+    m.add_class::<DVRSettings>()?;
+    m.add_class::<IsoSettings>()?;
+    m.add_class::<SSAOSettings>()?;
+    m.add_class::<LinearSegmentedColorMap>()?;
+    
+    Ok(())
 }

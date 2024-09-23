@@ -285,18 +285,6 @@ impl<F: Float + BaseNum + serde::Serialize> Aabb<F> {
     }
 }
 
-impl std::hash::Hash for Aabb<f32> {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.min.x.to_bits().hash(state);
-        self.min.y.to_bits().hash(state);
-        self.min.z.to_bits().hash(state);
-
-        self.max.x.to_bits().hash(state);
-        self.max.y.to_bits().hash(state);
-        self.max.z.to_bits().hash(state);
-    }
-}
-
 /// Squeeze out all dimensions of size 1
 pub fn squeeze<A, S>(array: ArrayBase<S, IxDyn>) -> ArrayBase<S, IxDyn>
 where

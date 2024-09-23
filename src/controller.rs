@@ -45,6 +45,17 @@ impl CameraController {
         }
     }
 
+    pub fn reset(&mut self){
+        self.amount = Vector3::zero();
+        self.shift = Vector2::zero();
+        self.rotation = Vector3::zero();
+        self.scroll = 0.0;
+        self.left_mouse_pressed = false;
+        self.right_mouse_pressed = false;
+        self.alt_pressed = false;
+        self.user_input = false;
+    }
+
     pub fn process_keyboard(&mut self, key: KeyCode, pressed: bool) -> bool {
         let amount = if pressed { 1.0 } else { 0.0 };
         let processed = match key {
