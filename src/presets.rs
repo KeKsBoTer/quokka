@@ -1,13 +1,12 @@
 use std::{collections::HashMap, io::Cursor};
 
 use cgmath::Point3;
-use cgmath::Quaternion;
 use include_dir::include_dir;
 use include_dir::Dir;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "python")]
-use pyo3::{prelude::*,exceptions::PyTypeError};
+use pyo3::prelude::*;
 
 use crate::{cmap::LinearSegmentedColorMap, renderer::RenderSettings};
 

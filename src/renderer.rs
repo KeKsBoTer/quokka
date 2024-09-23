@@ -8,8 +8,7 @@ use crate::{
 
 use cgmath::{EuclideanSpace, Matrix4, SquareMatrix, Vector2, Vector3, Vector4, Zero};
 #[cfg(feature = "python")]
-use pyo3::pymethods;
-use pyo3::{exceptions::PyValueError, PyResult};
+use pyo3::{pymethods,exceptions::PyValueError, PyResult};
 use serde::{Deserialize, Serialize};
 use wgpu::util::DeviceExt;
 
@@ -561,11 +560,12 @@ impl RenderSettings {
     }
 }
 
-fn str_to_filter_mode(name:&str)->anyhow::Result<wgpu::FilterMode>{
-    match name.to_lowercase().as_str(){
-        "nearest"=>Ok(wgpu::FilterMode::Nearest),
-        "linear"=>Ok(wgpu::FilterMode::Linear),
-        _=>Err(anyhow::anyhow!("Invalid filter mode '{:}'",name))
+#[cfg(feature = "python")]
+fn str_to_filter_mode(s: &str) -> Result<wgpu::FilterMode, String> {
+    match s.to_lowercase().as_str() {
+        "nearest" => Ok(wgpu::FilterMode::Nearest),
+        "linear" => Ok(wgpu::FilterMode::Linear),
+        _ => Err(format!("Invalid filter mode: {}", s)),
     }
 }
 
