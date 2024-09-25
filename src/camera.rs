@@ -1,5 +1,4 @@
 use cgmath::*;
-use half::vec;
 
 use crate::volume::Aabb;
 

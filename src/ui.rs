@@ -1,3 +1,4 @@
+use core::f32;
 use std::{f32::consts::PI, ops::RangeInclusive, time::Duration};
 
 use bytemuck::Zeroable;
@@ -162,9 +163,10 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
                     },
                     Err(err) => log::error!("failed to load presets from local storage: {}", err)
                 }
-                
             }
+
         });
+
         });
 
         CollapsingHeader::new("Advanced").show_unindented(ui, |ui| {
@@ -232,6 +234,34 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
                     ui.end_row();
                     ui.label("Bounding Box");
                     ui.checkbox(&mut state.show_box, "");
+
+                    ui.end_row();
+
+                    ui.label("Camera Rotation");
+                    let mut arc:Euler<_> = state.camera.rotation.into();
+                    
+                    ui.horizontal(|ui|{
+                        ui.drag_angle(&mut arc.x.0);
+                        ui.label("roll");
+                    });
+                    ui.end_row();
+                    ui.label("");
+                    ui.horizontal(|ui|{
+                        ui.drag_angle(&mut arc.y.0);
+                        ui.label("pitch");
+                    });
+                    ui.end_row();
+                    ui.label("");
+                    ui.horizontal(|ui|{
+                        ui.drag_angle(&mut arc.z.0);
+                        ui.label("yaw");
+                    });
+                    ui.end_row();
+
+                    state.camera.rotation = arc.into();
+                    let d = state.camera.position.distance(state.controller.center);
+                    state.camera.position = state.controller.center - state.camera.view_direction()*d;
+
                 });
         });
     });
@@ -668,7 +698,7 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
     return repaint;
 }
 
-use cgmath::{Transform, Vector3, Vector4};
+use cgmath::{Euler, MetricSpace, Transform, Vector3, Vector4};
 use egui::{epaint::PathShape, *};
 
 pub fn tf_ui(ui: &mut Ui, points: &mut Vec<(f32, f32, f32)>) -> egui::Response {

@@ -388,7 +388,7 @@ impl WindowContext {
             self.render_state.time = self.render_state.time.fract();
         }
 
-        let request_redraw = old_settings != self.render_state;
+        let request_redraw = old_settings != self.render_state || old_camera != self.camera;
         return request_redraw;
     }
 
