@@ -1,6 +1,6 @@
 [package]
 name = "quokka"
-version = "0.2.4"
+version = "0.3.0"
 edition = "2021"
 authors = ["Simon Niedermayr", "Christoph Neuhauser"]
 description = "4D Volume Viewer"
@@ -39,7 +39,7 @@ ndarray = {version = "0.15",features = ["rayon"]}
 # colormaps in binary
 include_dir = { version = "0.7.3" }
 # python bindings
-pyo3 = { version = "0.21", features = ["extension-module"], optional = true }
+pyo3 = { version = "0.21", features = ["extension-module","abi3-py38","anyhow","generate-import-lib"], optional = true }
 numpy = { version = "0.21", optional = true, features = ["half"] }
 
 nifti = { version = "0.16.0" }
@@ -71,7 +71,7 @@ instant = { version = "0.1.12", features = ["wasm-bindgen"] }
 
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
-wasm-bindgen-cli = "0.2.92"
+wasm-bindgen-cli = "0.2.93"
 
 [features]
 default = ["colormaps"]

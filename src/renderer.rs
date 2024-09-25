@@ -561,11 +561,11 @@ impl RenderSettings {
 }
 
 #[cfg(feature = "python")]
-fn str_to_filter_mode(name:&str)->anyhow::Result<wgpu::FilterMode>{
-    match name.to_lowercase().as_str(){
-        "nearest"=>Ok(wgpu::FilterMode::Nearest),
-        "linear"=>Ok(wgpu::FilterMode::Linear),
-        _=>Err(anyhow::anyhow!("Invalid filter mode '{:}'",name))
+fn str_to_filter_mode(s: &str) -> Result<wgpu::FilterMode, String> {
+    match s.to_lowercase().as_str() {
+        "nearest" => Ok(wgpu::FilterMode::Nearest),
+        "linear" => Ok(wgpu::FilterMode::Linear),
+        _ => Err(format!("Invalid filter mode: {}", s)),
     }
 }
 

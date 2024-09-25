@@ -153,11 +153,15 @@ class Preset:
             for f in cmap.keys():   
                 cmap[f] = [tuple(c) for c in cmap[f]]
 
+        camera = values.get("camera",None)
+        if camera is not None:
+            camera = _dict_to_tuple(camera)
+
         return Preset(
             values["name"],
             RenderSettings.from_dict(values["render_settings"]),
             cmap,    
-            values.get("camera",None)
+            camera
         )
 
 

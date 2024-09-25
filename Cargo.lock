@@ -2927,6 +2927,7 @@ version = "0.21.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a5e00b96a521718e08e03b1a622f01c8a8deb50719335de3f60b3b3950f069d8"
 dependencies = [
+ "anyhow",
  "cfg-if",
  "indoc",
  "libc",
@@ -2946,6 +2947,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7883df5835fafdad87c0d888b266c8ec0f4c9ca48a5bed6bbb592e8dedee1b50"
 dependencies = [
  "once_cell",
+ "python3-dll-a",
  "target-lexicon",
 ]
 
@@ -2985,6 +2987,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "python3-dll-a"
+version = "0.2.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bd0b78171a90d808b319acfad166c4790d9e9759bbc14ac8273fe133673dd41b"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "qoi"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3016,7 +3027,7 @@ dependencies = [
 
 [[package]]
 name = "quokka"
-version = "0.2.4"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "bytemuck",
