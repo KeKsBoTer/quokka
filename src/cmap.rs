@@ -29,6 +29,8 @@ static COLORMAPS_MATPLOTLIB: include_dir::Dir = include_dir!("colormaps/matplotl
 static COLORMAPS_SEABORN: include_dir::Dir = include_dir!("colormaps/seaborn");
 #[cfg(feature = "colormaps")]
 static COLORMAPS_CMASHER: include_dir::Dir = include_dir!("colormaps/cmasher");
+#[cfg(feature = "colormaps")]
+static COLORMAPS_CUSTOM: include_dir::Dir = include_dir!("colormaps/custom");
 
 #[cfg(feature = "colormaps")]
 fn load_cmaps(dir: &Dir) -> HashMap<String, GenericColorMap> {
@@ -52,6 +54,7 @@ pub static COLORMAPS: Lazy<HashMap<String, HashMap<String, GenericColorMap>>> = 
     cmaps.insert("matplotlib".to_string(), load_cmaps(&COLORMAPS_MATPLOTLIB));
     cmaps.insert("seaborn".to_string(), load_cmaps(&COLORMAPS_SEABORN));
     cmaps.insert("cmasher".to_string(), load_cmaps(&COLORMAPS_CMASHER));
+    cmaps.insert("custom".to_string(), load_cmaps(&COLORMAPS_CUSTOM));
 
     cmaps
 });

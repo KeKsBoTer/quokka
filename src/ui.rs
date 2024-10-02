@@ -345,7 +345,10 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
                                         egui::text_edit::TextEdit::singleline(&mut search_term)
                                             .hint_text("Search..."),
                                     );
-                                    for (group, cmaps) in cmaps.iter() {
+                                    let mut groups = cmaps.keys().collect::<Vec<_>>();
+                                    groups.sort();  
+                                    for group in groups{
+                                        let cmaps = &cmaps[group];
                                         ui.label(group);
                                         let mut sorted_cmaps: Vec<_> = cmaps.iter().collect();
                                         sorted_cmaps.sort_by_key(|e| e.0);

@@ -1,5 +1,6 @@
 # %%
 import json
+from typing import NamedTuple
 from matplotlib import pyplot as plt
 from os import makedirs
 from matplotlib.colors import LinearSegmentedColormap, ListedColormap, Colormap
@@ -61,3 +62,9 @@ export_colormaps(sns.cm, "colormaps/seaborn")
 import cmasher
 
 export_colormaps(cmasher.cm, "colormaps/cmasher")
+
+class CustomColormaps:
+    def __init__(self) -> None:
+        self.afmhot_trunc = ListedColormap(plt.colormaps["afmhot"](np.linspace(0.2, 1, 256)))
+
+export_colormaps(CustomColormaps(), "colormaps/custom")
