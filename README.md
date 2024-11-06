@@ -4,10 +4,6 @@
 
 # Quokka - Interactive Volume visualization
 
-[![PyPI](https://img.shields.io/pypi/v/quokka.svg)](https://pypi.org/project/quokka/)
-[![Docs](https://img.shields.io/badge/docs-mkdocs-blue)
-](https://keksboter.github.io/quokka/docs/)
-
 [👉 Click to run the web app 👈](https://keksboter.github.io/quokka)
 
 <!--![Viewer screenshot](https://raw.githubusercontent.com/KeKsBoTer/quokka/master/screenshot.png)-->
