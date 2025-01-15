@@ -7,11 +7,6 @@ struct Aabb {
 struct Settings {
     volume_aabb: Aabb,
 
-    time: f32,
-    time_steps: u32,
-    temporal_filter: u32,
-    spatial_filter: u32,
-    
     distance_scale: f32,
     vmin: f32,
     vmax: f32,
@@ -20,7 +15,6 @@ struct Settings {
     @align(16) @size(16) iso_ambient_color: vec3<f32>,
     @align(16) @size(16) iso_specular_color: vec3<f32>,
     @align(16) @size(16) iso_light_color: vec3<f32>,
-    iso_diffuse_color: vec4<f32>,
 
     render_mode_volume: u32, // use volume rendering
     render_mode_iso: u32, // use iso rendering
@@ -37,6 +31,7 @@ struct Settings {
     iso_threshold: f32,
     step_size:f32,
     near_clip_plane:f32,
+    spatial_filter: u32,
 }
 
 

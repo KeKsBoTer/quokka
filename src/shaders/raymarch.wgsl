@@ -16,11 +16,6 @@ struct CameraUniforms {
 
 struct Settings {
     volume_aabb: Aabb,
-
-    time: f32,
-    time_steps: u32,
-    temporal_filter: u32,
-    spatial_filter: u32,
     
     distance_scale: f32,
     vmin: f32,
@@ -30,7 +25,6 @@ struct Settings {
     @align(16) @size(16) iso_ambient_color: vec3<f32>,
     @align(16) @size(16) iso_specular_color: vec3<f32>,
     @align(16) @size(16) iso_light_color: vec3<f32>,
-    iso_diffuse_color: vec4<f32>,
 
     render_mode_volume: u32, // use volume rendering
     render_mode_iso: u32, // use iso rendering
@@ -47,6 +41,7 @@ struct Settings {
     iso_threshold: f32,
     step_size:f32,
     near_clip_plane:f32,
+    spatial_filter: u32,
 }
 
 
@@ -96,7 +91,7 @@ fn create_ray(view_inv: mat4x4<f32>, proj_inv: mat4x4<f32>, px: vec2<f32>) -> Ra
 @group(0) @binding(0)
 var volume : texture_3d<f32>;
 @group(0) @binding(1)
-var volume_next : texture_3d<f32>;
+var volume_color : texture_3d<f32>;
 @group(0) @binding(2)
 var volume_sampler: sampler;
 
@@ -107,9 +102,14 @@ var<uniform> camera: CameraUniforms;
 var<uniform> settings: Settings;
 
 @group(1) @binding(0)
-var cmap : texture_2d<f32>;
+var cmap_dvr : texture_2d<f32>;
 @group(1) @binding(1)
 var cmap_sampler: sampler;
+
+@group(2) @binding(0)
+var cmap_iso : texture_2d<f32>;
+@group(2) @binding(1)
+var cmap_sampler_iso: sampler;
 
 struct VertexOut {
     @builtin(position) pos: vec4<f32>,
@@ -153,16 +153,16 @@ fn sample_volume(pos: vec3<f32>) -> f32 {
     //  origin is in bottom left corner so we need to flip y 
     let pos_m = vec3<f32>(pos.x, 1. - pos.y, pos.z);
     let sample_curr = textureSampleLevel(volume, volume_sampler, pos_m, 0.).r;
-    let sample_next = textureSampleLevel(volume_next, volume_sampler, pos_m, 0.).r;
-    if settings.temporal_filter == FILTER_NEAREST {
-        return sample_curr;
-    } else {
-        let time_fraction = fract(settings.time * f32(settings.time_steps - (1)));
-        return mix(sample_curr, sample_next, time_fraction);
-    }
+    return sample_curr;
+}
+fn sample_color_volume(pos: vec3<f32>) -> f32 {
+    //  origin is in bottom left corner so we need to flip y 
+    let pos_m = vec3<f32>(pos.x, 1. - pos.y, pos.z);
+    let sample_curr = textureSampleLevel(volume_color, volume_sampler, pos_m, 0.).r;
+    return sample_curr;
 }
 
-fn sample_cmap(value: f32) -> vec4<f32> {
+fn sample_cmap(value: f32,cmap: texture_2d<f32>) -> vec4<f32> {
     let value_n = (value - settings.vmin) / (settings.vmax - settings.vmin);
     return textureSampleLevel(cmap, cmap_sampler, vec2<f32>(value_n, 0.5), 0.);
 }
@@ -386,7 +386,10 @@ fn trace_ray(ray_in: Ray,color_dvr:ptr<function,vec4<f32>>, color_iso:ptr<functi
                     }
                 }
 
-                let diffuse_color = settings.iso_diffuse_color;
+                let color_value = sample_color_volume(sample_pos);
+                let color_tf = sample_cmap(color_value,cmap_iso);
+
+                let diffuse_color = color_tf;//settings.iso_diffuse_color;
                 let ambient_color = settings.iso_ambient_color;
                 let specular_color = settings.iso_specular_color;
                 let shininess = settings.iso_shininess;
@@ -407,7 +410,6 @@ fn trace_ray(ray_in: Ray,color_dvr:ptr<function,vec4<f32>>, color_iso:ptr<functi
 
                 depth = distance(start_cam_pos, pos);
                 *color_iso = vec4<f32>(radiance,1.);
-
                 break;
             }
 
@@ -415,7 +417,7 @@ fn trace_ray(ray_in: Ray,color_dvr:ptr<function,vec4<f32>>, color_iso:ptr<functi
             sign = new_sign;
         }
         if bool(settings.render_mode_volume) {
-            let color_tf = sample_cmap(sample);
+            let color_tf = sample_cmap(sample,cmap_dvr);
             // we dont want full opacity color
             let sigma = color_tf.a * (1. - 1e-6);
             if sigma > 0. {

@@ -5,7 +5,14 @@ use numpy::{ndarray::StrideShape, IntoPyArray, PyArray4, PyReadonlyArrayDyn};
 use pyo3::prelude::*;
 use std::env::{self};
 
-use crate::{cmap::LinearSegmentedColorMap, offline::render_volume, presets::Preset, renderer::{DVRSettings, IsoSettings, RenderSettings, SSAOSettings}, viewer, volume::Volume};
+use crate::{
+    cmap::LinearSegmentedColorMap,
+    offline::render_volume,
+    presets::Preset,
+    renderer::{DVRSettings, IsoSettings, RenderSettings, SSAOSettings},
+    viewer,
+    volume::Volume,
+};
 
 #[pymodule]
 fn quokka<'py>(m: &Bound<'py, PyModule>) -> PyResult<()> {
@@ -54,6 +61,6 @@ fn quokka<'py>(m: &Bound<'py, PyModule>) -> PyResult<()> {
     m.add_class::<IsoSettings>()?;
     m.add_class::<SSAOSettings>()?;
     m.add_class::<LinearSegmentedColorMap>()?;
-    
+
     Ok(())
 }

@@ -15,7 +15,8 @@ async fn render_view<P: Projection>(
     queue: &wgpu::Queue,
     renderer: &mut VolumeRenderer,
     volume: &VolumeGPU,
-    cmap: &ColorMapGPU,
+    cmap_dvr: &ColorMapGPU,
+    cmap_iso: &ColorMapGPU,
     camera: Camera<P>,
     render_settings: &RenderState,
     resolution: Vector2<u32>,
@@ -43,7 +44,14 @@ async fn render_view<P: Projection>(
         label: Some("render encoder"),
     });
     let frame_buffer = FrameBuffer::new(&device, resolution, renderer.format());
-    let frame_data = renderer.prepare(device, volume, &camera, &render_settings, cmap);
+    let frame_data = renderer.prepare(
+        device,
+        volume,
+        &camera,
+        &render_settings,
+        cmap_dvr,
+        cmap_iso,
+    );
     renderer.render(&mut encoder, &frame_data, &frame_buffer);
     {
         let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -82,16 +90,30 @@ pub async fn render_volume(
         .map(|v| VolumeGPU::new(device, queue, v))
         .collect();
 
-    let cmap = match preset.cmap {
+    let cmap_dvr = match preset.cmap_dvr {
         Some(cmap) => cmap,
-        None => if !preset.render_settings.dvr.enabled {
-            LinearSegmentedColorMap::empty()
-        } else {
-            return Err(anyhow::anyhow!("No color map provided"))
-        },
+        None => {
+            if !preset.render_settings.dvr.enabled {
+                LinearSegmentedColorMap::empty()
+            } else {
+                return Err(anyhow::anyhow!("No color map provided"));
+            }
+        }
     };
 
-    let cmap_gpu = ColorMapGPU::new(&cmap, device, queue, COLORMAP_RESOLUTION);
+    let cmap_iso = match preset.cmap_iso {
+        Some(cmap) => cmap,
+        None => {
+            if !preset.render_settings.dvr.enabled {
+                LinearSegmentedColorMap::empty()
+            } else {
+                return Err(anyhow::anyhow!("No color map provided"));
+            }
+        }
+    };
+
+    let cmap_dvr_gpu = ColorMapGPU::new(&cmap_dvr, device, queue, COLORMAP_RESOLUTION);
+    let cmap_iso_gpu = ColorMapGPU::new(&cmap_iso, device, queue, COLORMAP_RESOLUTION);
 
     let render_format = wgpu::TextureFormat::Rgba8UnormSrgb;
 
@@ -115,10 +137,10 @@ pub async fn render_volume(
             queue,
             &mut renderer,
             &volume_gpu[0],
-            &cmap_gpu,
+            &cmap_dvr_gpu,
+            &cmap_iso_gpu,
             camera,
             &RenderState {
-                time: *time,
                 settings: preset.render_settings.clone(),
                 gamma_correction: !render_format.is_srgb(),
                 step_size: 1e-4,

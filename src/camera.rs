@@ -22,13 +22,11 @@ impl<P: Projection> Camera<P> {
 
     pub fn new_aabb_iso(aabb: Aabb<f32>, projection: P, cam_pos: Option<Point3<f32>>) -> Self {
         let r = aabb.radius();
-        let corner = cam_pos.map(|v|v.to_vec()).unwrap_or(Vector3::new(1., 1., 1.).normalize()*2.8);
-        let view_dir = Quaternion::look_at(-corner, Vector3::unit_y());
-        Camera::new(
-            aabb.center() + corner*r,
-            view_dir,
-            projection,
-        )
+        let corner = cam_pos
+            .map(|v| v.to_vec())
+            .unwrap_or(Vector3::new(-1., -1., -1.).normalize() * 2.8);
+        let view_dir = Quaternion::look_at(corner, Vector3::unit_y());
+        Camera::new(aabb.center() + corner * r, view_dir, projection)
     }
 
     pub fn view_matrix(&self) -> Matrix4<f32> {
@@ -155,7 +153,6 @@ impl OrthographicProjection {
             self.viewport.y = self.viewport.x / ratio;
         }
     }
-
 }
 
 impl Projection for OrthographicProjection {
@@ -192,20 +189,18 @@ fn hessian_plane(p: Vector4<f32>) -> Vector4<f32> {
     return p / l;
 }
 
-impl OrthographicCamera{
-
-    pub fn fit_near_far(&mut self,aabb:&Aabb<f32>){
+impl OrthographicCamera {
+    pub fn fit_near_far(&mut self, aabb: &Aabb<f32>) {
         // find the distance from the camera to the aabb center in camera z direction
         let h: Vector3<f32> = aabb.center() - self.position;
         let c = self.view_direction();
-        let a = h.angle(c).cos()*h.magnitude();
+        let a = h.angle(c).cos() * h.magnitude();
 
-        let min_near = (a-aabb.radius()).max(1e-4);
-        let max_far = a+aabb.radius();
-        
+        let min_near = (a - aabb.radius()).max(1e-4);
+        let max_far = a + aabb.radius();
 
         // workaround until clamp_to_range works with sliders agai
         self.projection.znear = min_near;
         self.projection.zfar = max_far;
-}
+    }
 }

@@ -4,9 +4,9 @@ use cgmath::Point3;
 use include_dir::include_dir;
 use include_dir::Dir;
 use once_cell::sync::Lazy;
-use serde::{Deserialize, Serialize};
 #[cfg(feature = "python")]
 use pyo3::prelude::*;
+use serde::{Deserialize, Serialize};
 
 use crate::{cmap::LinearSegmentedColorMap, renderer::RenderSettings};
 
@@ -44,8 +44,9 @@ pub static PRESETS: once_cell::sync::Lazy<HashMap<String, Preset>> =
 pub struct Preset {
     pub name: String,
     pub render_settings: RenderSettings,
-    pub cmap: Option<LinearSegmentedColorMap>,
-    pub camera:Option<Point3<f32>>
+    pub cmap_dvr: Option<LinearSegmentedColorMap>,
+    pub cmap_iso: Option<LinearSegmentedColorMap>,
+    pub camera: Option<Point3<f32>>,
 }
 
 impl Preset {
@@ -57,19 +58,18 @@ impl Preset {
 #[cfg(feature = "python")]
 #[pymethods]
 impl Preset {
-
     #[new]
     fn __new__(
         name: String,
         render_settings: RenderSettings,
         cmap: Option<LinearSegmentedColorMap>,
-        camera: Option<(f32,f32,f32)>,
+        camera: Option<(f32, f32, f32)>,
     ) -> Self {
         Preset {
             name,
             render_settings,
             cmap,
-            camera: camera.map(|(x,y,z)| Point3::new(x,y,z))
+            camera: camera.map(|(x, y, z)| Point3::new(x, y, z)),
         }
     }
 
@@ -78,12 +78,10 @@ impl Preset {
     }
 }
 
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Presets(pub HashMap<String, Preset>);
 
 impl Presets {
-
     #[cfg(target_arch = "wasm32")]
     pub fn from_local_storage() -> anyhow::Result<Self> {
         use crate::local_storage;
@@ -95,9 +93,7 @@ impl Presets {
                 .unwrap_or("failed to load presets from local storage".to_string()))
         })?;
         match presets {
-            Some(presets) => {
-                Ok(serde_json::from_str(&presets)?)
-            }
+            Some(presets) => Ok(serde_json::from_str(&presets)?),
             None => Ok(Self(HashMap::new())),
         }
     }

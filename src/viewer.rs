@@ -56,6 +56,7 @@ where
         window_builder,
         volumes,
         cmap.into_linear_segmented(cmap::COLORMAP_RESOLUTION),
+        cmap.into_linear_segmented(cmap::COLORMAP_RESOLUTION),
         RenderConfig {
             no_vsync: opt.no_vsync,
             show_colormap_editor: true,

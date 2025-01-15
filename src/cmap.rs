@@ -144,7 +144,7 @@ impl<'a> ColorMap for &'a ListedColorMap {
     type Item = ListedColorMap;
     fn sample(&self, x: f32) -> Vector4<u8> {
         let n = self.0.len() as f32;
-        let i = (x * n).min(n - 1.0).max(0.0) as usize;
+        let i: usize = (x * n).min(n - 1.0).max(0.0) as usize;
         self.0[i] // TODO linear interpolation
     }
 
@@ -391,10 +391,10 @@ impl LinearSegmentedColorMap {
             vec![(0., 0., 0.), (1., 0., 0.)],
             vec![(0., 0., 0.), (1., 0., 0.)],
             None,
-        ).unwrap()
+        )
+        .unwrap()
     }
 }
-
 
 #[cfg(feature = "python")]
 #[pymethods]
@@ -406,7 +406,6 @@ impl LinearSegmentedColorMap {
         b: Vec<(f32, f32, f32)>,
         a: Option<Vec<(f32, f32, f32)>>,
     ) -> PyResult<Self> {
-
         Self::new(r, g, b, a).map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
     }
 
@@ -414,7 +413,6 @@ impl LinearSegmentedColorMap {
         format!("{:?}", self)
     }
 }
-
 
 impl ColorMap for &LinearSegmentedColorMap {
     type Item = LinearSegmentedColorMap;

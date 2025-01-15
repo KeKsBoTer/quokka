@@ -14,11 +14,9 @@ use std::time::Instant;
 use wgpu::util::{DeviceExt, TextureDataOrder};
 
 pub struct Volume {
-    // pub timesteps: u32,
-    // pub resolution: Vector3<u32>,
     pub aabb: Aabb<f32>,
-    pub min_value: f32,
-    pub max_value: f32,
+    min_values: Vec<f32>,
+    max_values: Vec<f32>,
     data: ndarray::Array4<f16>,
 }
 
@@ -40,6 +38,7 @@ impl Volume {
             data = data.insert_axis(ndarray::Axis(0));
         }
 
+        let channels = data.shape()[0];
         let data = data.as_standard_layout();
 
         let shape = data.shape();
@@ -54,32 +53,30 @@ impl Volume {
                 shape[1] as f32 / *res_min as f32,
             ),
         };
-        log::info!("volume shape is: {:?}, interpreted as [TxWxHxD]", shape);
-
-        let mut min_value = f32::MAX;
-        let mut max_value = f32::MIN;
+        log::info!("volume shape is: {:?}, interpreted as [CxWxHxD]", shape);
 
         let array_f16 = data.map(|v| {
             let v_f: f64 = (*v).clone().into();
-            min_value = min_value.min(v_f as f32);
-            max_value = max_value.max(v_f as f32);
             f16::from_f64(v_f)
         });
 
-        if min_value == max_value {
-            log::warn!(
-                "min value({}) == max value({}), setting max to min + 1",
-                min_value,
-                max_value
-            );
-            max_value = min_value + 1.0;
+        let mut min_values = Vec::with_capacity(channels);
+        let mut max_values = Vec::with_capacity(channels);
+        for c in 0..channels {
+            let min_max = data
+                .index_axis(Axis(0), c)
+                .fold((f16::MAX, f16::MIN), |(vmin, vmax), v| {
+                    (vmin.min(*v), vmax.max(*v))
+                });
+            min_values.push(min_max.0.to_f32());
+            max_values.push(min_max.1.to_f32());
         }
 
         log::debug!("a shape: {:?}", shape);
         let volume = Self {
             aabb,
-            min_value: min_value as f32,
-            max_value: max_value as f32,
+            min_values,
+            max_values,
             data: Array4::from_shape_vec(
                 Ix4(shape[0], shape[1], shape[2], shape[3]),
                 array_f16.as_slice().unwrap().to_vec(),
@@ -90,8 +87,15 @@ impl Volume {
         return Ok(volume);
     }
 
-    pub fn timesteps(&self) -> usize {
+    pub fn channels(&self) -> usize {
         self.data.shape()[0]
+    }
+
+    pub fn min_value(&self, channel: usize) -> f32 {
+        self.min_values[channel]
+    }
+    pub fn max_value(&self, channel: usize) -> f32 {
+        self.max_values[channel]
     }
 
     pub fn resolution(&self) -> Vector3<u32> {
@@ -210,7 +214,7 @@ pub struct VolumeGPU {
 
 impl VolumeGPU {
     pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, volume: Volume) -> Self {
-        let timesteps = volume.timesteps();
+        let timesteps = volume.channels();
         let resolution = volume.resolution();
         let textures = (0..timesteps)
             .map(|i| {

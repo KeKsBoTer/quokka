@@ -45,7 +45,7 @@ impl CameraController {
         }
     }
 
-    pub fn reset(&mut self){
+    pub fn reset(&mut self) {
         self.amount = Vector3::zero();
         self.shift = Vector2::zero();
         self.rotation = Vector3::zero();

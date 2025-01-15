@@ -239,7 +239,7 @@ async fn start_viewer(
     };
 
     wasm_bindgen_futures::spawn_local(async move {
-        let reader_v =  Cursor::new(volume_data);
+        let reader_v = Cursor::new(volume_data);
         let volumes = Volume::load(reader_v);
         overlay.set_attribute("style", "display:none;").ok();
 

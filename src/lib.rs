@@ -4,12 +4,7 @@ use controller::CameraController;
 use egui::FullOutput;
 use image::ImageReader;
 use renderer::{Display, FrameBuffer, IsoSettings, RenderSettings, RenderState, VolumeRenderer};
-use std::{
-    collections::HashMap,
-    io::Cursor,
-    path::PathBuf,
-    sync::Arc,
-};
+use std::{collections::HashMap, io::Cursor, path::PathBuf, sync::Arc};
 use volume::VolumeGPU;
 
 #[cfg(target_arch = "wasm32")]
@@ -116,11 +111,12 @@ pub struct WindowContext {
     renderer: VolumeRenderer,
 
     render_state: RenderState,
-    cmap_gpu: cmap::ColorMapGPU,
-    cmap: LinearSegmentedColorMap,
 
-    playing: bool,
-    animation_duration: Duration,
+    cmap_dvr_gpu: cmap::ColorMapGPU,
+    cmap_iso_gpu: cmap::ColorMapGPU,
+
+    cmap_dvr: LinearSegmentedColorMap,
+    cmap_iso: LinearSegmentedColorMap,
 
     colormap_editor_visible: bool,
     volume_info_visible: bool,
@@ -143,7 +139,8 @@ impl WindowContext {
     async fn new(
         window: Window,
         volume: Volume,
-        cmap: LinearSegmentedColorMap,
+        cmap_dvr: LinearSegmentedColorMap,
+        cmap_iso: LinearSegmentedColorMap,
         render_config: &RenderConfig,
     ) -> anyhow::Result<Self> {
         let mut size = window.inner_size();
@@ -229,14 +226,13 @@ impl WindowContext {
             })
             .unwrap_or(RenderSettings {
                 iso_surface: IsoSettings {
-                    threshold: (volume.min_value + volume.max_value) / 2.,
+                    threshold: (volume.min_value(0) + volume.max_value(0)) / 2.,
                     ..Default::default()
                 },
                 ..Default::default()
             });
 
         let render_state = RenderState {
-            time: 0.,
             settings: render_settings,
             gamma_correction: !render_format.is_srgb(),
             step_size: 2e-3,
@@ -253,13 +249,10 @@ impl WindowContext {
             None,
         );
 
-        let animation_duration = render_config
-            .duration
-            .unwrap_or(Duration::from_secs_f32(10.));
-
         let volumes_gpu = VolumeGPU::new(device, queue, volume);
 
-        let cmap_gpu = ColorMapGPU::new(&cmap, device, queue, COLORMAP_RESOLUTION);
+        let cmap_dvr_gpu = ColorMapGPU::new(&cmap_dvr, device, queue, COLORMAP_RESOLUTION);
+        let cmap_iso_gpu = ColorMapGPU::new(&cmap_iso, device, queue, COLORMAP_RESOLUTION);
 
         let ssao = ssao::SSAO::new(device);
 
@@ -286,10 +279,10 @@ impl WindowContext {
             renderer,
 
             render_state,
-            cmap_gpu,
-            cmap,
-            animation_duration,
-            playing: true,
+            cmap_dvr_gpu,
+            cmap_iso_gpu,
+            cmap_dvr,
+            cmap_iso,
             colormap_editor_visible: render_config.show_colormap_editor,
             volume_info_visible: render_config.show_volume_info,
             #[cfg(feature = "colormaps")]
@@ -312,10 +305,19 @@ impl WindowContext {
     pub(crate) fn set_preset(&mut self, preset: Preset) {
         self.render_state.settings = preset.render_settings;
         self.selected_preset = Some(preset.name);
-        if let Some(cmap) = preset.cmap {
-            self.cmap = cmap;
-            self.cmap_gpu = ColorMapGPU::new(
-                &self.cmap,
+        if let Some(cmap) = preset.cmap_dvr {
+            self.cmap_dvr = cmap;
+            self.cmap_dvr_gpu = ColorMapGPU::new(
+                &self.cmap_dvr,
+                &self.wgpu_context.device,
+                &self.wgpu_context.queue,
+                COLORMAP_RESOLUTION,
+            );
+        }
+        if let Some(cmap) = preset.cmap_iso {
+            self.cmap_iso = cmap;
+            self.cmap_iso_gpu = ColorMapGPU::new(
+                &self.cmap_iso,
                 &self.wgpu_context.device,
                 &self.wgpu_context.queue,
                 COLORMAP_RESOLUTION,
@@ -325,11 +327,7 @@ impl WindowContext {
             let aabb = self.volume.volume.aabb.clone();
             self.controller.center = aabb.center();
 
-            self.camera = Camera::new_aabb_iso(
-                aabb,
-                self.camera.projection.clone(),
-                Some(camera),
-            );
+            self.camera = Camera::new_aabb_iso(aabb, self.camera.projection.clone(), Some(camera));
             self.controller.reset();
         }
     }
@@ -381,12 +379,6 @@ impl WindowContext {
         let volume_aabb = self.volume.volume.aabb;
 
         self.camera.fit_near_far(&volume_aabb);
-
-
-        if self.playing && self.volume.volume.timesteps() > 1 {
-            self.render_state.time += dt.as_secs_f32() / self.animation_duration.as_secs_f32();
-            self.render_state.time = self.render_state.time.fract();
-        }
 
         let request_redraw = old_settings != self.render_state || old_camera != self.camera;
         return request_redraw;
@@ -447,7 +439,8 @@ impl WindowContext {
             &self.volume,
             &camera,
             &self.render_state,
-            &self.cmap_gpu,
+            &self.cmap_dvr_gpu,
+            &self.cmap_iso_gpu,
         );
 
         self.renderer
@@ -497,7 +490,8 @@ impl WindowContext {
 pub async fn open_window(
     window_builder: WindowBuilder,
     volume: Volume,
-    cmap: LinearSegmentedColorMap,
+    cmap_dvr: LinearSegmentedColorMap,
+    cmap_iso: LinearSegmentedColorMap,
     config: RenderConfig,
 ) {
     let event_loop = EventLoop::new().unwrap();
@@ -531,7 +525,7 @@ pub async fn open_window(
         })
         .unwrap_or(Duration::from_millis(17));
 
-    let mut state = WindowContext::new(window, volume, cmap, &config)
+    let mut state = WindowContext::new(window, volume, cmap_dvr, cmap_iso, &config)
         .await
         .unwrap();
 
@@ -549,92 +543,92 @@ pub async fn open_window(
         Event::WindowEvent {
             ref event,
             window_id,
-        } if window_id == state.window.id() && !state.ui_renderer.on_event(&state.window,event) =>{
-             match event {
-            WindowEvent::Resized(physical_size) => {
-                state.resize(*physical_size, None);
-            }
-            WindowEvent::ScaleFactorChanged {
-                scale_factor,
-                ..
-            } => {
-                state.scale_factor = *scale_factor as f32;
-            }
-            WindowEvent::CloseRequested => {log::info!("close!");target.exit()},
-            WindowEvent::ModifiersChanged(m)=>{
-                state.controller.alt_pressed = m.state().alt_key();
-            }
-            WindowEvent::KeyboardInput { event, .. } => {
-                if let PhysicalKey::Code(key) = event.physical_key{
-                    state
-                        .controller
-                        .process_keyboard(key, event.state == ElementState::Pressed);
-                    if key == KeyCode::KeyU && event.state == ElementState::Released{
-                        state.ui_visible = !state.ui_visible;
+        } if window_id == state.window.id() && !(state.ui_visible && state.ui_renderer.on_event(&state.window,event)) =>{
+            match event {
+                WindowEvent::Resized(physical_size) => {
+                    state.resize(*physical_size, None);
+                }
+                WindowEvent::ScaleFactorChanged {
+                    scale_factor,
+                    ..
+                } => {
+                    state.scale_factor = *scale_factor as f32;
+                }
+                WindowEvent::CloseRequested => {log::info!("close!");target.exit()},
+                WindowEvent::ModifiersChanged(m)=>{
+                    state.controller.alt_pressed = m.state().alt_key();
+                }
+                WindowEvent::KeyboardInput { event, .. } => {
+                    if let PhysicalKey::Code(key) = event.physical_key{
+                        state
+                            .controller
+                            .process_keyboard(key, event.state == ElementState::Pressed);
+                        if key == KeyCode::KeyU && event.state == ElementState::Released{
+                            state.ui_visible = !state.ui_visible;
+                        }
                     }
                 }
-            }
-            WindowEvent::MouseWheel { delta, .. } => match delta {
-                winit::event::MouseScrollDelta::LineDelta(_, dy) => {
-                    state.controller.process_scroll(*dy )
-                }
-                winit::event::MouseScrollDelta::PixelDelta(p) => {
-                    state.controller.process_scroll(p.y as f32 / 100.)
-                }
-            },
-            WindowEvent::MouseInput { state:button_state, button, .. }=>{
-                match button {
-                    winit::event::MouseButton::Left =>                         state.controller.left_mouse_pressed = *button_state == ElementState::Pressed,
-                    winit::event::MouseButton::Right => state.controller.right_mouse_pressed = *button_state == ElementState::Pressed,
-                    _=>{}
-                }
-            },
-            WindowEvent::Touch(t) => {
-                if t.phase == winit::event::TouchPhase::Moved{
-                    state.controller.process_mouse((t.location.x - last_touch_pos.x) as f32, (t.location.y - last_touch_pos.y) as f32);
-                    last_touch_pos = t.location;
-                }else if t.phase == winit::event::TouchPhase::Started{
-                    last_touch_pos = t.location;
-                }
-            }
-            WindowEvent::DroppedFile(file) => {
-                if let Err(e) = state.load_file(file){
-                    log::error!("failed to load file: {:?}", e)
-                }
-            }
-            WindowEvent::RedrawRequested => {
-                if !config.no_vsync{
-                    // make sure the next redraw is called with a small delay
-                    target.set_control_flow(ControlFlow::wait_duration(min_wait));
-                }
-                let now = Instant::now();
-                let dt = now-last;
-                last = now;
-                let request_redraw = state.update(dt);
-
-                let (redraw_ui,shapes) = state.ui();
-
-                // check whether we need to redraw
-                if request_redraw || redraw_ui{
-                    match state.render(state.window.clone(),state.ui_visible.then_some(shapes)) {
-                        Ok(_) => {}
-                        // Reconfigure the surface if lost
-                        Err(wgpu::SurfaceError::Lost) =>{
-                            log::error!("lost surface!");
-                            state.resize(state.window.inner_size(), None)
-
-                            },
-                        // The system is out of memory, we should probably quit
-                        Err(wgpu::SurfaceError::OutOfMemory) =>target.exit(),
-                        // All other errors (Outdated, Timeout) should be resolved by the next frame
-                        Err(e) => println!("error: {:?}", e),
+                WindowEvent::MouseWheel { delta, .. } => match delta {
+                    winit::event::MouseScrollDelta::LineDelta(_, dy) => {
+                        state.controller.process_scroll(*dy )
+                    }
+                    winit::event::MouseScrollDelta::PixelDelta(p) => {
+                        state.controller.process_scroll(p.y as f32 / 100.)
+                    }
+                },
+                WindowEvent::MouseInput { state:button_state, button, .. }=>{
+                    match button {
+                        winit::event::MouseButton::Left =>                         state.controller.left_mouse_pressed = *button_state == ElementState::Pressed,
+                        winit::event::MouseButton::Right => state.controller.right_mouse_pressed = *button_state == ElementState::Pressed,
+                        _=>{}
+                    }
+                },
+                WindowEvent::Touch(t) => {
+                    if t.phase == winit::event::TouchPhase::Moved{
+                        state.controller.process_mouse((t.location.x - last_touch_pos.x) as f32, (t.location.y - last_touch_pos.y) as f32);
+                        last_touch_pos = t.location;
+                    }else if t.phase == winit::event::TouchPhase::Started{
+                        last_touch_pos = t.location;
                     }
                 }
-                if config.no_vsync{
-                    state.window.request_redraw();
+                WindowEvent::DroppedFile(file) => {
+                    if let Err(e) = state.load_file(file){
+                        log::error!("failed to load file: {:?}", e)
+                    }
                 }
+                WindowEvent::RedrawRequested => {
+                    if !config.no_vsync{
+                        // make sure the next redraw is called with a small delay
+                        target.set_control_flow(ControlFlow::wait_duration(min_wait));
+                    }
+                    let now = Instant::now();
+                    let dt = now-last;
+                    last = now;
+                    let request_redraw = state.update(dt);
 
-            }
+                    let (redraw_ui,shapes) = state.ui();
+
+                    // check whether we need to redraw
+                    if request_redraw || redraw_ui{
+                        match state.render(state.window.clone(),state.ui_visible.then_some(shapes)) {
+                            Ok(_) => {}
+                            // Reconfigure the surface if lost
+                            Err(wgpu::SurfaceError::Lost) =>{
+                                log::error!("lost surface!");
+                                state.resize(state.window.inner_size(), None)
+
+                                },
+                            // The system is out of memory, we should probably quit
+                            Err(wgpu::SurfaceError::OutOfMemory) =>target.exit(),
+                            // All other errors (Outdated, Timeout) should be resolved by the next frame
+                            Err(e) => println!("error: {:?}", e),
+                        }
+                    }
+                    if config.no_vsync{
+                        state.window.request_redraw();
+                    }
+
+                }
             _ => {}
         }},
         Event::DeviceEvent {

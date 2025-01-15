@@ -14,9 +14,7 @@ pub struct SSAO {
 }
 
 impl SSAO {
-    pub fn new(
-        device: &wgpu::Device
-    ) -> Self {
+    pub fn new(device: &wgpu::Device) -> Self {
         let shader = device.create_shader_module(wgpu::include_wgsl!("shaders/ssao.wgsl"));
 
         let bg_layout = Self::bind_group_layout(device);
@@ -323,4 +321,3 @@ impl SSAO {
         }
     }
 }
-

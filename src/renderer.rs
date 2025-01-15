@@ -8,7 +8,7 @@ use crate::{
 
 use cgmath::{EuclideanSpace, Matrix4, SquareMatrix, Vector2, Vector3, Vector4, Zero};
 #[cfg(feature = "python")]
-use pyo3::{pymethods,exceptions::PyValueError, PyResult};
+use pyo3::{exceptions::PyValueError, pymethods, PyResult};
 use serde::{Deserialize, Serialize};
 use wgpu::util::DeviceExt;
 
@@ -25,6 +25,7 @@ impl VolumeRenderer {
             label: Some("render pipeline layout"),
             bind_group_layouts: &[
                 &Self::bind_group_layout(device),
+                &ColorMapGPU::bind_group_layout(device),
                 &ColorMapGPU::bind_group_layout(device),
             ],
             push_constant_ranges: &[],
@@ -105,7 +106,8 @@ impl VolumeRenderer {
         volume: &VolumeGPU,
         camera: &Camera<P>,
         render_settings: &RenderState,
-        cmap: &'a ColorMapGPU,
+        cmap_dvr: &'a ColorMapGPU,
+        cmap_iso: &'a ColorMapGPU,
     ) -> PerFrameData<'a> {
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("camera buffer"),
@@ -122,7 +124,8 @@ impl VolumeRenderer {
             usage: wgpu::BufferUsages::UNIFORM,
         });
 
-        let step = ((volume.volume.timesteps() - 1) as f32 * render_settings.time) as usize;
+        let scalar_index = render_settings.settings.scalar_channel;
+        let color_index = render_settings.settings.iso_surface.color_channel;
         // TODO maybe create all bindgroups once and not on the fly per frame
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("volume renderer bind group"),
@@ -131,13 +134,14 @@ impl VolumeRenderer {
                 wgpu::BindGroupEntry {
                     binding: 0,
                     resource: wgpu::BindingResource::TextureView(
-                        &volume.textures[step].create_view(&wgpu::TextureViewDescriptor::default()),
+                        &volume.textures[scalar_index]
+                            .create_view(&wgpu::TextureViewDescriptor::default()),
                     ),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
                     resource: wgpu::BindingResource::TextureView(
-                        &volume.textures[(step + 1) % volume.volume.timesteps() as usize]
+                        &volume.textures[color_index]
                             .create_view(&wgpu::TextureViewDescriptor::default()),
                     ),
                 },
@@ -167,7 +171,8 @@ impl VolumeRenderer {
         });
         PerFrameData {
             bind_group,
-            cmap_bind_group: cmap.bindgroup(),
+            cmap_dvr_bind_group: cmap_dvr.bindgroup(),
+            cmap_iso_bind_group: cmap_iso.bindgroup(),
         }
     }
 
@@ -209,7 +214,8 @@ impl VolumeRenderer {
         });
 
         render_pass.set_bind_group(0, &frame_data.bind_group, &[]);
-        render_pass.set_bind_group(1, frame_data.cmap_bind_group, &[]);
+        render_pass.set_bind_group(1, frame_data.cmap_dvr_bind_group, &[]);
+        render_pass.set_bind_group(2, frame_data.cmap_iso_bind_group, &[]);
         render_pass.set_pipeline(&self.pipeline);
 
         render_pass.draw(0..4, 0..1);
@@ -275,7 +281,8 @@ impl VolumeRenderer {
 
 pub struct PerFrameData<'a> {
     pub(crate) bind_group: wgpu::BindGroup,
-    cmap_bind_group: &'a wgpu::BindGroup,
+    cmap_dvr_bind_group: &'a wgpu::BindGroup,
+    cmap_iso_bind_group: &'a wgpu::BindGroup,
 }
 
 #[repr(C)]
@@ -331,7 +338,6 @@ impl<P: Projection> From<&Camera<P>> for CameraUniform {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct RenderState {
-    pub time: f32,
     pub settings: RenderSettings,
 
     pub gamma_correction: bool,
@@ -401,8 +407,8 @@ pub struct IsoSettings {
     /// The light color used for isosurface rendering.
     pub light_color: Vector3<f32>,
 
-    /// The diffuse color used for isosurface rendering.
-    pub diffuse_color: Vector4<f32>,
+    /// Channel used for coloring the iso surface
+    pub color_channel: usize,
 }
 
 impl Default for IsoSettings {
@@ -415,7 +421,7 @@ impl Default for IsoSettings {
             ambient_color: Vector3::zero(),
             specular_color: Vector3::new(0.7, 0.7, 0.7),
             light_color: Vector3::new(1., 1., 1.),
-            diffuse_color: Vector4::new(1.0, 0.871, 0.671, 1.0),
+            color_channel: 1,
         }
     }
 }
@@ -479,14 +485,8 @@ impl Default for SSAOSettings {
 #[cfg(feature = "python")]
 #[pymethods]
 impl SSAOSettings {
-
     #[new]
-    fn __new__(
-        enabled: bool,
-        radius: f32,
-        bias: f32,
-        kernel_size: u32,
-    ) -> Self {
+    fn __new__(enabled: bool, radius: f32, bias: f32, kernel_size: u32) -> Self {
         Self {
             enabled,
             radius,
@@ -494,7 +494,6 @@ impl SSAOSettings {
             kernel_size,
         }
     }
-
 
     fn __repr__(&self) -> String {
         format!("{:?}", self)
@@ -509,9 +508,6 @@ pub struct RenderSettings {
     /// The spatial filter mode used for rendering.
     pub spatial_filter: wgpu::FilterMode,
 
-    /// The temporal filter mode used for rendering.
-    pub temporal_filter: wgpu::FilterMode,
-
     pub dvr: DVRSettings,
     pub iso_surface: IsoSettings,
     pub ssao: SSAOSettings,
@@ -520,6 +516,7 @@ pub struct RenderSettings {
     pub background_color: wgpu::Color,
 
     pub near_clip_plane: Option<f32>,
+    pub scalar_channel: usize,
 }
 
 #[cfg(feature = "python")]
@@ -527,17 +524,18 @@ pub struct RenderSettings {
 impl RenderSettings {
     #[new]
     fn __new__(
-        spatial_filer:String,
-        temporal_filter:String,
+        spatial_filer: String,
+        temporal_filter: String,
         dvr: DVRSettings,
         iso: IsoSettings,
         ssao: SSAOSettings,
         background_color: [f64; 4],
         near_clip_plane: Option<f32>,
     ) -> PyResult<Self> {
-
-        let spatial_filter = str_to_filter_mode(&spatial_filer).map_err(|e|PyValueError::new_err(e.to_string()))?;
-        let temporal_filter = str_to_filter_mode(&temporal_filter).map_err(|e|PyValueError::new_err(e.to_string()))?;
+        let spatial_filter =
+            str_to_filter_mode(&spatial_filer).map_err(|e| PyValueError::new_err(e.to_string()))?;
+        let temporal_filter = str_to_filter_mode(&temporal_filter)
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
 
         Ok(Self {
             dvr: dvr,
@@ -573,12 +571,12 @@ impl Default for RenderSettings {
     fn default() -> Self {
         Self {
             spatial_filter: wgpu::FilterMode::Linear,
-            temporal_filter: wgpu::FilterMode::Linear,
             background_color: wgpu::Color::WHITE,
             dvr: DVRSettings::default(),
             iso_surface: IsoSettings::default(),
             ssao: SSAOSettings::default(),
             near_clip_plane: None,
+            scalar_channel:0
         }
     }
 }
@@ -589,11 +587,6 @@ pub struct RenderSettingsUniform {
     volume_aabb_min: Vector4<f32>,
     volume_aabb_max: Vector4<f32>,
 
-    time: f32,
-    time_steps: u32,
-    temporal_filter: u32,
-    spatial_filter: u32,
-
     distance_scale: f32,
     vmin: f32,
     vmax: f32,
@@ -602,7 +595,6 @@ pub struct RenderSettingsUniform {
     iso_ambient_color: Vector4<f32>,
     iso_specular_color: Vector4<f32>,
     iso_light_color: Vector4<f32>,
-    iso_diffuse_color: Vector4<f32>,
 
     render_volume: u32,
     render_iso: u32,
@@ -619,7 +611,7 @@ pub struct RenderSettingsUniform {
     iso_threshold: f32,
     step_size: f32,
     near_clip_plane: f32,
-    _pad: [u32; 1],
+    spatial_filter: u32,
 }
 impl RenderSettingsUniform {
     pub fn from_settings(state: &RenderState, volume: &Volume) -> Self {
@@ -632,14 +624,11 @@ impl RenderSettingsUniform {
         Self {
             volume_aabb_min: volume_aabb.min.to_vec().extend(0.),
             volume_aabb_max: volume_aabb.max.to_vec().extend(0.),
-            time: state.time,
-            time_steps: volume.timesteps() as u32,
             step_size: state.step_size,
-            temporal_filter: state.settings.temporal_filter as u32,
             spatial_filter: state.settings.spatial_filter as u32,
             distance_scale: dvr_settings.distance_scale,
-            vmin: dvr_settings.vmin.unwrap_or(volume.min_value),
-            vmax: dvr_settings.vmax.unwrap_or(volume.max_value),
+            vmin: dvr_settings.vmin.unwrap_or(volume.min_value(0)),
+            vmax: dvr_settings.vmax.unwrap_or(volume.max_value(0)),
             gamma_correction: state.gamma_correction as u32,
             render_volume: state.settings.dvr.enabled as u32,
             render_iso: state.settings.iso_surface.enabled as u32,
@@ -649,7 +638,6 @@ impl RenderSettingsUniform {
             iso_ambient_color: iso_settings.ambient_color.extend(0.),
             iso_specular_color: iso_settings.specular_color.extend(0.),
             iso_light_color: iso_settings.light_color.extend(0.),
-            iso_diffuse_color: iso_settings.diffuse_color,
             ssao_radius: ssao_settings.radius,
             ssao_bias: ssao_settings.bias,
             ssao_kernel_size: ssao_settings.kernel_size,
@@ -661,7 +649,6 @@ impl RenderSettingsUniform {
             ),
             ssao_enabled: ssao_settings.enabled as u32,
             near_clip_plane: state.settings.near_clip_plane.unwrap_or(0.),
-            _pad: [0; 1],
         }
     }
 }
@@ -671,10 +658,7 @@ impl Default for RenderSettingsUniform {
         Self {
             volume_aabb_min: Vector4::new(-1., -1., -1., 0.),
             volume_aabb_max: Vector4::new(1., 1., 1., 0.),
-            time: 0.,
-            time_steps: 1,
             step_size: 0.01,
-            temporal_filter: wgpu::FilterMode::Linear as u32,
             spatial_filter: wgpu::FilterMode::Nearest as u32,
             distance_scale: 1.,
             vmin: 0.,
@@ -689,7 +673,6 @@ impl Default for RenderSettingsUniform {
 
             iso_specular_color: Vector4::new(1., 1., 1., 0.),
             iso_light_color: Vector4::new(1., 1., 1., 0.),
-            iso_diffuse_color: Vector4::new(1.0, 0.871, 0.671, 1.0),
 
             ssao_radius: 0.4,
             ssao_bias: 0.02,
@@ -697,7 +680,6 @@ impl Default for RenderSettingsUniform {
             background_color: Vector4::new(0., 0., 0., 1.),
             ssao_enabled: 1,
             near_clip_plane: 0.,
-            _pad: [0; 1],
         }
     }
 }
