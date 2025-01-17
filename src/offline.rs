@@ -3,7 +3,6 @@ use image::{ImageBuffer, Rgba};
 
 use crate::{
     camera::{Camera, OrthographicProjection, Projection},
-    cmap::{ColorMapGPU, LinearSegmentedColorMap, COLORMAP_RESOLUTION},
     presets::Preset,
     renderer::{Display, FrameBuffer, RenderState, VolumeRenderer},
     volume::{Volume, VolumeGPU},
@@ -15,8 +14,6 @@ async fn render_view<P: Projection>(
     queue: &wgpu::Queue,
     renderer: &mut VolumeRenderer,
     volume: &VolumeGPU,
-    cmap_dvr: &ColorMapGPU,
-    cmap_iso: &ColorMapGPU,
     camera: Camera<P>,
     render_settings: &RenderState,
     resolution: Vector2<u32>,
@@ -44,14 +41,7 @@ async fn render_view<P: Projection>(
         label: Some("render encoder"),
     });
     let frame_buffer = FrameBuffer::new(&device, resolution, renderer.format());
-    let frame_data = renderer.prepare(
-        device,
-        volume,
-        &camera,
-        &render_settings,
-        cmap_dvr,
-        cmap_iso,
-    );
+    let frame_data = renderer.prepare(device, queue, volume, &camera, &render_settings);
     renderer.render(&mut encoder, &frame_data, &frame_buffer);
     {
         let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -76,9 +66,8 @@ async fn render_view<P: Projection>(
 pub async fn render_volume(
     volumes: Vec<Volume>,
     resolution: Vector2<u32>,
-    frames: &[f32],
     preset: Preset,
-) -> anyhow::Result<Vec<ImageBuffer<Rgba<u8>, Vec<u8>>>> {
+) -> anyhow::Result<ImageBuffer<Rgba<u8>, Vec<u8>>> {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
     let wgpu_context = WGPUContext::new(&instance, None).await;
     let device = &wgpu_context.device;
@@ -89,31 +78,6 @@ pub async fn render_volume(
         .into_iter()
         .map(|v| VolumeGPU::new(device, queue, v))
         .collect();
-
-    let cmap_dvr = match preset.cmap_dvr {
-        Some(cmap) => cmap,
-        None => {
-            if !preset.render_settings.dvr.enabled {
-                LinearSegmentedColorMap::empty()
-            } else {
-                return Err(anyhow::anyhow!("No color map provided"));
-            }
-        }
-    };
-
-    let cmap_iso = match preset.cmap_iso {
-        Some(cmap) => cmap,
-        None => {
-            if !preset.render_settings.dvr.enabled {
-                LinearSegmentedColorMap::empty()
-            } else {
-                return Err(anyhow::anyhow!("No color map provided"));
-            }
-        }
-    };
-
-    let cmap_dvr_gpu = ColorMapGPU::new(&cmap_dvr, device, queue, COLORMAP_RESOLUTION);
-    let cmap_iso_gpu = ColorMapGPU::new(&cmap_iso, device, queue, COLORMAP_RESOLUTION);
 
     let render_format = wgpu::TextureFormat::Rgba8UnormSrgb;
 
@@ -130,27 +94,21 @@ pub async fn render_volume(
 
     camera.fit_near_far(&volume_gpu[0].volume.aabb);
 
-    let mut images: Vec<ImageBuffer<Rgba<u8>, Vec<u8>>> = Vec::with_capacity(frames.len());
-    for time in frames {
-        let img = render_view(
-            device,
-            queue,
-            &mut renderer,
-            &volume_gpu[0],
-            &cmap_dvr_gpu,
-            &cmap_iso_gpu,
-            camera,
-            &RenderState {
-                settings: preset.render_settings.clone(),
-                gamma_correction: !render_format.is_srgb(),
-                step_size: 1e-4,
-            },
-            resolution,
-        )
-        .await?;
-        images.push(img);
-    }
-    Ok(images)
+    let img = render_view(
+        device,
+        queue,
+        &mut renderer,
+        &volume_gpu[0],
+        camera,
+        &RenderState {
+            settings: preset.render_settings.clone(),
+            gamma_correction: !render_format.is_srgb(),
+            step_size: 1e-4,
+        },
+        resolution,
+    )
+    .await?;
+    Ok(img)
 }
 
 pub async fn download_texture(

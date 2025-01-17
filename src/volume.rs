@@ -72,7 +72,6 @@ impl Volume {
             max_values.push(min_max.1.to_f32());
         }
 
-        log::debug!("a shape: {:?}", shape);
         let volume = Self {
             aabb,
             min_values,

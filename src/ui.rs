@@ -1,13 +1,13 @@
 use core::f32;
 use std::{f32::consts::PI, ops::RangeInclusive};
 
-use bytemuck::Zeroable;
 use egui::{emath::Numeric, vec2};
-use egui_plot::{AxisHints, GridMark, Plot, PlotImage, PlotPoint};
+use egui_plot::{Plot, PlotImage, PlotPoint};
 
 use crate::{
-    cmap::{ColorMap, LinearSegmentedColorMap, COLORMAP_RESOLUTION},
+    cmap::{ColorMap, COLORMAP_RESOLUTION},
     presets::Preset,
+    renderer::ColorMode,
     WindowContext,
 };
 
@@ -52,6 +52,7 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
                     ui.checkbox(&mut state.render_state.settings.iso_surface.enabled, "Iso Surface");
                 });
                 ui.end_row();
+                if state.volume.volume.channels()>1{
                 ui.label("Channel");
                 channel_combobox(
                     ui,
@@ -60,6 +61,7 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
                     state.volume.volume.channels(),
                 );
                 ui.end_row();
+                }
                 ui.label("Near Clip Plane");
 
                 let mut near_clip_plane = state.render_state.settings.near_clip_plane.unwrap_or(0.);
@@ -116,8 +118,6 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
                     let preset = Preset{
                         name: file_name.clone(),
                         render_settings: state.render_state.settings.clone(),
-                        cmap_dvr: state.render_state.settings.dvr.enabled.then_some(state.cmap_dvr.clone()),
-                        cmap_iso: state.render_state.settings.dvr.enabled.then_some(state.cmap_iso.clone()),
                         camera: Some(state.camera.position),
                     };
                     serde_json::to_writer_pretty(file, &preset).unwrap();
@@ -131,7 +131,6 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
                         let new_preset = Preset{
                             name: file_name.clone(),
                             render_settings: state.render_state.settings.clone(),
-                            cmap: state.render_state.settings.dvr.enabled.then_some(state.cmap.clone()),
                             camera: Some(state.camera.position),
                         };
                         local_presets.0.insert(file_name.clone(), new_preset.clone());
@@ -279,7 +278,7 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
                     if state.cmap_select_visible {
                         ui.label("Colormap");
                         ui.horizontal(|ui| {
-                           selected_cmap(ui,"dvr_colormap".into(),&mut state.cmap_dvr);
+                           selected_cmap(ui,"dvr_colormap".into(),&mut state.render_state.settings.dvr.cmap);
                         });
                     }
                 });
@@ -293,7 +292,7 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
                     .unwrap_or(state.volume.volume.max_value(0));
                 ui.add(egui::Label::new(egui::RichText::new("Preview").strong()));
                 ui.end_row();
-                show_cmap(ui, egui::Id::new("cmap preview"), &state.cmap_dvr, vmin, vmax);
+                show_cmap(ui, egui::Id::new("cmap preview"), &state.render_state.settings.dvr.cmap, vmin, vmax);
                 CollapsingHeader::new("Alpha Editor").default_open(true).show_unindented(ui, |ui| {
                     ui.end_row();
                     ui.horizontal_wrapped(|ui| {
@@ -302,40 +301,40 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
                             .button("\\/")
                             .on_hover_text("double click for smooth version");
                         if v_hack.clicked() {
-                            state.cmap_dvr.a = Some(vec![(0.0, 1.0, 1.0), (0.5, 0., 0.), (1.0, 1.0, 1.0)]);
+                            state.render_state.settings.dvr.cmap.a = Some(vec![(0.0, 1.0, 1.0), (0.5, 0., 0.), (1.0, 1.0, 1.0)]);
                         }
                         if v_hack.double_clicked() {
-                            state.cmap_dvr.a =
+                            state.render_state.settings.dvr.cmap.a =
                                 Some(build_segments(25, |x| ((x * 2. * PI).cos() + 1.) / 2.));
                         }
                         let slope_hack = ui
                             .button("/")
                             .on_hover_text("double click for smooth version");
                         if slope_hack.clicked() {
-                            state.cmap_dvr.a = Some(build_segments(2, |x| (-(x * PI).cos() + 1.) / 2.));
+                            state.render_state.settings.dvr.cmap.a = Some(build_segments(2, |x| (-(x * PI).cos() + 1.) / 2.));
                         }
                         if slope_hack.double_clicked() {
-                            state.cmap_dvr.a = Some(build_segments(25, |x| (-(x * PI).cos() + 1.) / 2.));
+                            state.render_state.settings.dvr.cmap.a = Some(build_segments(25, |x| (-(x * PI).cos() + 1.) / 2.));
                         }
                         let double_v_hack = ui
                             .button("/\\/\\")
                             .on_hover_text("double click for smooth version");
                         if double_v_hack.clicked() {
-                            state.cmap_dvr.a =
+                            state.render_state.settings.dvr.cmap.a =
                                 Some(build_segments(5, |x| (-(x * 4. * PI).cos() + 1.) / 2.));
                         }
                         if double_v_hack.double_clicked() {
-                            state.cmap_dvr.a =
+                            state.render_state.settings.dvr.cmap.a =
                                 Some(build_segments(25, |x| (-(x * 4. * PI).cos() + 1.) / 2.));
                         }
                         if ui.button("-").clicked() {
-                            state.cmap_dvr.a = Some(vec![(0.0, 1.0, 1.0), (1.0, 1.0, 1.0)]);
+                            state.render_state.settings.dvr.cmap.a = Some(vec![(0.0, 1.0, 1.0), (1.0, 1.0, 1.0)]);
                         }
                     });
 
                     ui.separator();
 
-                    if let Some(a) = &mut state.cmap_dvr.a {
+                    if let Some(a) = &mut state.render_state.settings.dvr.cmap.a {
                         tf_ui(ui, a)
                         .on_hover_text("Drag anchor points to change transfer function.\nLeft-Click for new anchor point.\nRight-Click to delete anchor point.");
                     }
@@ -345,10 +344,8 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
                 ui.separator();
             });
     }
-    state
-        .cmap_dvr_gpu
-        .update(&state.wgpu_context.queue, &state.cmap_dvr);
 
+    let mut new_iso_color = None;
     if state.render_state.settings.iso_surface.enabled {
         egui::Window::new("Iso Surface Rendering")
             .default_size(vec2(300., 50.))
@@ -368,8 +365,7 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
 
                         ui.end_row();
                         ui.label("Threshold");
-                        let selected_scalar_channel =
-                            state.render_state.settings.scalar_channel;
+                        let selected_scalar_channel = state.render_state.settings.scalar_channel;
                         ui.add(
                             egui::DragValue::new(
                                 &mut state.render_state.settings.iso_surface.threshold,
@@ -383,27 +379,51 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
                         ui.end_row();
 
                         ui.label("Color");
-                        // color_edit_button_rgba(
-                        //     ui,
-                        //     &mut state.render_state.settings.iso_surface.diffuse_color,
-                        // );
-                        selected_cmap(ui, "iso_colormap".into(),&mut state.cmap_iso);
-                        state
-                            .cmap_iso_gpu
-                            .update(&state.wgpu_context.queue, &state.cmap_iso);
+
+                        let constant_color = match &state.render_state.settings.iso_surface.color {
+                            ColorMode::Constant(_) => true,
+                            _ => false,
+                        };
+
+                        let mut changed = false;
+                        if ui.radio(constant_color, "Color").clicked() {
+                            new_iso_color = Some(crate::renderer::ColorMode::Constant(
+                                Vector3::new(0.33, 0.33, 0.33),
+                            ));
+                            changed = true;
+                        }
+                        if ui.radio(!constant_color, "Colormap").clicked() {
+                            new_iso_color =
+                                Some(crate::renderer::ColorMode::ColorMap(COLORMAPS.get("seaborn").unwrap().get("icefire").unwrap().clone()));
+                            log::debug!("Switched to colormap");
+                            changed = true;
+                        }
+                        ui.end_row();
+                        ui.label("");
+
+                        if !changed {
+                            match &state.render_state.settings.iso_surface.color {
+                                crate::renderer::ColorMode::Constant(c) => {
+                                    let mut color = c.clone();
+                                    color_edit_button_rgb(ui, &mut color);
+                                    new_iso_color =
+                                        Some(crate::renderer::ColorMode::Constant(color.into()));
+                                }
+                                crate::renderer::ColorMode::ColorMap(color_map) => {
+                                    let mut cmap = color_map.clone();
+                                    selected_cmap(ui, "iso_colormap".into(), &mut cmap);
+                                    new_iso_color =
+                                        Some(crate::renderer::ColorMode::ColorMap(cmap));
+                                }
+                            }
+                        }
                         ui.end_row();
 
                         ui.label("SSAO");
                         ui.checkbox(&mut state.render_state.settings.ssao.enabled, "");
                         ui.end_row();
-
                     });
 
-                let color_channel = state.render_state.settings.iso_surface.color_channel;
-                show_cmap(ui, egui::Id::new("cmap iso preview"), &state.cmap_iso, 
-                    state.volume.volume.min_value(color_channel),
-                    state.volume.volume.max_value(color_channel),
-                );
                 ui.collapsing("Advanced", |ui| {
                     egui::collapsing_header::CollapsingHeader::new("Phong Shading")
                         .open(Some(true))
@@ -495,6 +515,10 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
                 });
             });
     }
+    if let Some(new_color) = new_iso_color {
+        state.render_state.settings.iso_surface.color = new_color;
+    }
+
     if state.volume_info_visible {
         egui::Window::new("Volume Info").show(ctx, |ui| {
             egui::Grid::new("volume_info")
@@ -591,6 +615,45 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
                     Stroke::new(3., egui::Color32::from_rgba_unmultiplied(0, 0, 0, 100)),
                 ));
             }
+
+            egui::Area::new("cmap_legend".into())
+                .anchor(Align2::RIGHT_BOTTOM, Vec2::new(-10., -10.))
+                .pivot(Align2::RIGHT_BOTTOM)
+                .interactable(true)
+                .sense(Sense::hover())
+                .order(Order::Middle)
+                .default_width(200.)
+                .show(ctx, |ui| {
+                    ui.set_min_size(vec2(200., 0.));
+                    if state.render_state.settings.dvr.enabled {
+                        ui.heading("Volume Rendering");
+                        let scalar_channel = state.render_state.settings.scalar_channel;
+                        let min = state.volume.volume.min_value(scalar_channel);
+                        let max = state.volume.volume.max_value(scalar_channel);
+                        show_cmap(
+                            ui,
+                            "legend_dvr_cmap".into(),
+                            &state.render_state.settings.dvr.cmap,
+                            min,
+                            max,
+                        );
+                    }
+                    if state.render_state.settings.iso_surface.enabled {
+                        if let ColorMode::ColorMap(cmap) =
+                            &state.render_state.settings.iso_surface.color
+                        {
+                            let min = state
+                                .volume
+                                .volume
+                                .min_value(state.render_state.settings.iso_surface.color_channel);
+                            let max = state
+                                .volume
+                                .volume
+                                .max_value(state.render_state.settings.iso_surface.color_channel);
+                            show_cmap(ui, "legend_iso_cmap".into(), cmap, min, max);
+                        }
+                    }
+                });
         });
 
     let repaint = ctx.has_requested_repaint();
@@ -602,7 +665,7 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
     return repaint;
 }
 
-use cgmath::{Euler, MetricSpace, Transform, Vector3, Vector4};
+use cgmath::{Euler, MetricSpace, Transform, Vector3};
 use egui::{epaint::PathShape, *};
 
 pub fn tf_ui(ui: &mut Ui, points: &mut Vec<(f32, f32, f32)>) -> egui::Response {
@@ -685,16 +748,11 @@ pub fn tf_ui(ui: &mut Ui, points: &mut Vec<(f32, f32, f32)>) -> egui::Response {
     response
 }
 
-use std::hash::Hash;
-
 /// Load or create a texture from a colormap
 /// If the texture is already loaded, return the texture id
 /// Otherwise, create a new texture and store it in the egui context
 #[cfg(feature = "colormaps")]
-fn load_or_create<C>(ui: &egui::Ui, cmap: C, n: u32) -> egui::TextureId
-where
-    C: ColorMap + Hash,
-{
+fn load_or_create(ui: &egui::Ui, cmap: &ColorMap, n: u32) -> egui::TextureId {
     let id = Id::new(&cmap);
     let tex: Option<egui::TextureHandle> = ui.ctx().data_mut(|d| d.get_temp(id));
     match tex {
@@ -717,11 +775,7 @@ where
 
 // stores colormap texture in egui context
 // only updates texture if it changed
-fn cmap_preview<C>(ui: &egui::Ui, cmap: C, n: u32) -> egui::TextureId
-where
-    C: ColorMap + Hash,
-{
-    let id: Id = Id::new("cmap_preview_texture");
+fn cmap_preview(ui: &egui::Ui, id: Id, cmap: &ColorMap, n: u32) -> egui::TextureId {
     let tex: Option<(Id, egui::TextureHandle)> = ui.ctx().data_mut(|d| d.get_temp(id));
     match tex {
         Some((old_id, mut tex)) => {
@@ -791,10 +845,10 @@ fn optional_drag<T: Numeric>(
     }
 }
 
-fn show_cmap(ui: &mut egui::Ui, id: egui::Id, cmap: impl ColorMap + Hash, vmin: f32, vmax: f32) {
-    let texture = cmap_preview(ui, cmap, COLORMAP_RESOLUTION);
+fn show_cmap(ui: &mut egui::Ui, id: egui::Id, cmap: &ColorMap, vmin: f32, vmax: f32) {
+    let texture = cmap_preview(ui, id, cmap, COLORMAP_RESOLUTION);
     let width = vmax - vmin;
-    let height = width / 5.;
+    let height = 10.;
     let image = PlotImage::new(
         texture,
         PlotPoint::new(vmin + width * 0.5, height / 2.),
@@ -803,14 +857,11 @@ fn show_cmap(ui: &mut egui::Ui, id: egui::Id, cmap: impl ColorMap + Hash, vmin: 
     let plot = Plot::new(id)
         .show_x(true)
         .show_y(false)
-        .height(100.)
+        .height(50.)
         .show_background(false)
         .show_grid(false)
-        .set_margin_fraction(Vec2::zeroed())
         .show_y(false)
         .custom_y_axes(vec![])
-        .custom_x_axes(vec![AxisHints::new_x().label_spacing(Rangef::new(0., 0.6))])
-        .include_x(vmin).include_x(vmax)
         .allow_boxed_zoom(false)
         .allow_double_click_reset(false)
         .allow_drag(false)
@@ -821,6 +872,7 @@ fn show_cmap(ui: &mut egui::Ui, id: egui::Id, cmap: impl ColorMap + Hash, vmin: 
     });
 }
 
+// discretize a function and return a list of segments (x, y0, y1)
 fn build_segments<F: Fn(f32) -> f32>(n: usize, f: F) -> Vec<(f32, f32, f32)> {
     (0..n)
         .map(|i| {
@@ -840,33 +892,20 @@ pub fn color_edit_button_rgb(ui: &mut Ui, rgb: &mut Vector3<f32>) -> Response {
     response
 }
 
-pub fn color_edit_button_rgba(ui: &mut Ui, rgb: &mut Vector4<f32>) -> Response {
-    let mut rgba = Rgba::from_rgba_premultiplied(rgb[0], rgb[1], rgb[2], rgb[3]);
-    let response =
-        color_picker::color_edit_button_rgba(ui, &mut rgba, color_picker::Alpha::BlendOrAdditive);
-    rgb[0] = rgba[0];
-    rgb[1] = rgba[1];
-    rgb[2] = rgba[2];
-    rgb[3] = rgba[3];
-    response
-}
-
-pub fn selected_cmap(ui: &mut Ui, id:Id, cmap: &mut LinearSegmentedColorMap) {
+/// dropdown for selecting a colormap
+pub fn selected_cmap(ui: &mut Ui, id: Id, cmap: &mut ColorMap) {
     let selected_id = id.with("selected_cmap");
     let search_id = id.with("cmap_search");
-    let cmaps = &COLORMAPS;
+    let cmaps: &once_cell::sync::Lazy<
+        std::collections::HashMap<String, std::collections::HashMap<String, ColorMap>>,
+    > = &COLORMAPS;
     let mut selected_cmap: (String, String) = ui.ctx().data_mut(|d| {
-        d.get_persisted_mut_or(
-            // "selected_cmap".into(),
-            selected_id,
-            ("seaborn".to_string(), "icefire".to_string()),
-        )
-        .clone()
-    });
-    let mut search_term: String = ui.ctx().data_mut(|d| {
-        d.get_temp_mut_or(search_id, "".to_string())
+        d.get_persisted_mut_or(selected_id, ("seaborn".to_string(), "icefire".to_string()))
             .clone()
     });
+    let mut search_term: String = ui
+        .ctx()
+        .data_mut(|d| d.get_temp_mut_or(search_id, "".to_string()).clone());
     let old_selected_cmap = selected_cmap.clone();
     egui::ComboBox::new(id.with("cmap_select"), "")
         .selected_text(selected_cmap.1.clone())
@@ -898,11 +937,10 @@ pub fn selected_cmap(ui: &mut Ui, id:Id, cmap: &mut LinearSegmentedColorMap) {
                 ui.separator();
             }
         });
-        
+
     if old_selected_cmap != selected_cmap {
         let old_alpha = cmap.a.clone();
-        *cmap =
-            cmaps[&selected_cmap.0][&selected_cmap.1].into_linear_segmented(COLORMAP_RESOLUTION);
+        *cmap = cmaps[&selected_cmap.0][&selected_cmap.1].clone();
         if cmap.a.is_none() || cmaps[&selected_cmap.0][&selected_cmap.1].has_boring_alpha_channel()
         {
             cmap.a = old_alpha;
@@ -911,21 +949,21 @@ pub fn selected_cmap(ui: &mut Ui, id:Id, cmap: &mut LinearSegmentedColorMap) {
             d.insert_persisted(selected_id, selected_cmap);
         });
     }
-    ui.ctx()
-        .data_mut(|d| d.insert_temp(search_id, search_term));
+    ui.ctx().data_mut(|d| d.insert_temp(search_id, search_term));
     if cmap.a.is_none() {
         cmap.a = Some(vec![(0.0, 1.0, 1.0), (1.0, 1.0, 1.0)]);
     }
-    // if ui.button("↔").clicked() {
-    //     *cmap = *cmap.reverse();
-    // }
+    if ui.button("↔").clicked() {
+        cmap.reverse();
+    }
 }
 
-fn channel_combobox(ui: &mut Ui, name: &str, channel: &mut usize, max_channel: usize) {
+/// dropdown for selecting a channel
+fn channel_combobox(ui: &mut Ui, name: &str, channel: &mut usize, num_channels: usize) {
     egui::ComboBox::new(name, "")
         .selected_text(channel.to_string())
         .show_ui(ui, |ui| {
-            for c in 0..max_channel {
+            for c in 0..num_channels {
                 ui.selectable_value(channel, c, c.to_string());
             }
         });

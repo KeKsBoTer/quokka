@@ -1,9 +1,9 @@
 use clap::Parser;
 use std::{ffi::OsString, fmt::Debug, fs::File, io::BufReader, path::PathBuf};
 
-use winit::{dpi::PhysicalSize, window::WindowBuilder};
+use winit::{dpi::LogicalSize, window::WindowBuilder};
 
-use crate::{cmap, open_window, presets::Preset, volume::Volume, RenderConfig};
+use crate::{open_window, presets::Preset, volume::Volume, RenderConfig};
 
 #[derive(Debug, Parser)]
 #[command(author, version, about)]
@@ -30,17 +30,9 @@ where
 
     let data_file = File::open(&opt.input)?;
 
-    let window_builder = WindowBuilder::new().with_inner_size(PhysicalSize::new(800, 600));
+    let window_builder = WindowBuilder::new().with_inner_size(LogicalSize::new(800, 600));
 
     let volumes = Volume::load(BufReader::new(data_file)).expect("Failed to load volume");
-
-    #[cfg(feature = "colormaps")]
-    let cmap = cmap::COLORMAPS["seaborn"]["icefire"].clone();
-    #[cfg(not(feature = "colormaps"))]
-    let cmap = {
-        let reader = File::open(&opt.colormap)?;
-        cmap::GenericColorMap::read(reader)?
-    };
 
     let preset = opt
         .preset
@@ -55,8 +47,6 @@ where
     open_window(
         window_builder,
         volumes,
-        cmap.into_linear_segmented(cmap::COLORMAP_RESOLUTION),
-        cmap.into_linear_segmented(cmap::COLORMAP_RESOLUTION),
         RenderConfig {
             no_vsync: opt.no_vsync,
             show_colormap_editor: true,

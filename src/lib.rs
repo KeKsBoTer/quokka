@@ -1,5 +1,4 @@
 use camera::{Camera, OrthographicProjection};
-use cmap::LinearSegmentedColorMap;
 use controller::CameraController;
 use egui::FullOutput;
 use image::ImageReader;
@@ -21,17 +20,14 @@ pub use web::*;
 
 use cgmath::Vector2;
 use winit::{
-    dpi::{PhysicalPosition, PhysicalSize},
+    dpi::{LogicalSize, PhysicalPosition, PhysicalSize},
     event::{DeviceEvent, ElementState, Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
     keyboard::{KeyCode, PhysicalKey},
     window::{Window, WindowBuilder},
 };
 
-use crate::{
-    cmap::{ColorMapGPU, COLORMAP_RESOLUTION},
-    volume::Volume,
-};
+use crate::volume::Volume;
 
 pub mod camera;
 pub mod cmap;
@@ -112,12 +108,6 @@ pub struct WindowContext {
 
     render_state: RenderState,
 
-    cmap_dvr_gpu: cmap::ColorMapGPU,
-    cmap_iso_gpu: cmap::ColorMapGPU,
-
-    cmap_dvr: LinearSegmentedColorMap,
-    cmap_iso: LinearSegmentedColorMap,
-
     colormap_editor_visible: bool,
     volume_info_visible: bool,
     #[cfg(feature = "colormaps")]
@@ -139,13 +129,11 @@ impl WindowContext {
     async fn new(
         window: Window,
         volume: Volume,
-        cmap_dvr: LinearSegmentedColorMap,
-        cmap_iso: LinearSegmentedColorMap,
         render_config: &RenderConfig,
     ) -> anyhow::Result<Self> {
-        let mut size = window.inner_size();
+        let mut size = window.inner_size().to_logical(window.scale_factor());
         if size.width == 0 || size.height == 0 {
-            size = PhysicalSize::new(800, 600);
+            size = LogicalSize::new(800, 600);
         }
         let window = Arc::new(window);
 
@@ -215,7 +203,6 @@ impl WindowContext {
         }
 
         let mut selected_preset = None;
-
         let render_settings = render_config
             .preset
             .as_ref()
@@ -227,6 +214,7 @@ impl WindowContext {
             .unwrap_or(RenderSettings {
                 iso_surface: IsoSettings {
                     threshold: (volume.min_value(0) + volume.max_value(0)) / 2.,
+                    color_channel: 1.min(volume.channels()),
                     ..Default::default()
                 },
                 ..Default::default()
@@ -250,9 +238,6 @@ impl WindowContext {
         );
 
         let volumes_gpu = VolumeGPU::new(device, queue, volume);
-
-        let cmap_dvr_gpu = ColorMapGPU::new(&cmap_dvr, device, queue, COLORMAP_RESOLUTION);
-        let cmap_iso_gpu = ColorMapGPU::new(&cmap_iso, device, queue, COLORMAP_RESOLUTION);
 
         let ssao = ssao::SSAO::new(device);
 
@@ -279,10 +264,6 @@ impl WindowContext {
             renderer,
 
             render_state,
-            cmap_dvr_gpu,
-            cmap_iso_gpu,
-            cmap_dvr,
-            cmap_iso,
             colormap_editor_visible: render_config.show_colormap_editor,
             volume_info_visible: render_config.show_volume_info,
             #[cfg(feature = "colormaps")]
@@ -305,24 +286,6 @@ impl WindowContext {
     pub(crate) fn set_preset(&mut self, preset: Preset) {
         self.render_state.settings = preset.render_settings;
         self.selected_preset = Some(preset.name);
-        if let Some(cmap) = preset.cmap_dvr {
-            self.cmap_dvr = cmap;
-            self.cmap_dvr_gpu = ColorMapGPU::new(
-                &self.cmap_dvr,
-                &self.wgpu_context.device,
-                &self.wgpu_context.queue,
-                COLORMAP_RESOLUTION,
-            );
-        }
-        if let Some(cmap) = preset.cmap_iso {
-            self.cmap_iso = cmap;
-            self.cmap_iso_gpu = ColorMapGPU::new(
-                &self.cmap_iso,
-                &self.wgpu_context.device,
-                &self.wgpu_context.queue,
-                COLORMAP_RESOLUTION,
-            );
-        }
         if let Some(camera) = preset.camera {
             let aabb = self.volume.volume.aabb.clone();
             self.controller.center = aabb.center();
@@ -436,11 +399,10 @@ impl WindowContext {
         let camera = self.camera.clone();
         let frame_data = self.renderer.prepare(
             &self.wgpu_context.device,
+            &self.wgpu_context.queue,
             &self.volume,
             &camera,
             &self.render_state,
-            &self.cmap_dvr_gpu,
-            &self.cmap_iso_gpu,
         );
 
         self.renderer
@@ -487,13 +449,7 @@ impl WindowContext {
     }
 }
 
-pub async fn open_window(
-    window_builder: WindowBuilder,
-    volume: Volume,
-    cmap_dvr: LinearSegmentedColorMap,
-    cmap_iso: LinearSegmentedColorMap,
-    config: RenderConfig,
-) {
+pub async fn open_window(window_builder: WindowBuilder, volume: Volume, config: RenderConfig) {
     let event_loop = EventLoop::new().unwrap();
 
     let version = env!("CARGO_PKG_VERSION");
@@ -510,6 +466,7 @@ pub async fn open_window(
 
     let window = window_builder
         .with_title(format!("{name} {version}"))
+        .with_inner_size(LogicalSize::new(800, 600))
         .with_window_icon(Some(
             winit::window::Icon::from_rgba(icon.into_rgba8().into_vec(), icon_width, icon_height)
                 .unwrap(),
@@ -525,9 +482,7 @@ pub async fn open_window(
         })
         .unwrap_or(Duration::from_millis(17));
 
-    let mut state = WindowContext::new(window, volume, cmap_dvr, cmap_iso, &config)
-        .await
-        .unwrap();
+    let mut state = WindowContext::new(window, volume, &config).await.unwrap();
 
     let mut last = Instant::now();
 

@@ -2,7 +2,7 @@ use std::fmt::Debug;
 
 use crate::{
     camera::{Camera, Projection},
-    cmap::ColorMapGPU,
+    cmap::{ColorMap, COLORMAPS, COLORMAP_RESOLUTION},
     volume::{Volume, VolumeGPU},
 };
 
@@ -10,7 +10,7 @@ use cgmath::{EuclideanSpace, Matrix4, SquareMatrix, Vector2, Vector3, Vector4, Z
 #[cfg(feature = "python")]
 use pyo3::{exceptions::PyValueError, pymethods, PyResult};
 use serde::{Deserialize, Serialize};
-use wgpu::util::DeviceExt;
+use wgpu::{util::DeviceExt, Extent3d};
 
 pub struct VolumeRenderer {
     pipeline: wgpu::RenderPipeline,
@@ -91,7 +91,6 @@ impl VolumeRenderer {
             min_filter: wgpu::FilterMode::Nearest,
             ..Default::default()
         });
-
         VolumeRenderer {
             pipeline,
             sampler_nearest,
@@ -100,15 +99,14 @@ impl VolumeRenderer {
         }
     }
 
-    pub fn prepare<'a, P: Projection>(
+    pub fn prepare<P: Projection>(
         &mut self,
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         volume: &VolumeGPU,
         camera: &Camera<P>,
         render_settings: &RenderState,
-        cmap_dvr: &'a ColorMapGPU,
-        cmap_iso: &'a ColorMapGPU,
-    ) -> PerFrameData<'a> {
+    ) -> PerFrameData {
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("camera buffer"),
             contents: bytemuck::bytes_of(&CameraUniform::from(camera)),
@@ -169,10 +167,27 @@ impl VolumeRenderer {
                 },
             ],
         });
+
+        let cmap_dvr = ColorMapGPU::new(
+            device,
+            queue,
+            &render_settings.settings.dvr.cmap,
+            COLORMAP_RESOLUTION,
+        );
+
+        let iso_cmap = match &render_settings.settings.iso_surface.color {
+            ColorMode::Constant(color) => &ColorMap::from_color(
+                Vector4::new(color.x, color.y, color.z, 1.),
+                COLORMAP_RESOLUTION,
+            ),
+            ColorMode::ColorMap(cmap) => cmap,
+        };
+        let cmap_iso = ColorMapGPU::new(device, queue, iso_cmap, COLORMAP_RESOLUTION);
+
         PerFrameData {
             bind_group,
-            cmap_dvr_bind_group: cmap_dvr.bindgroup(),
-            cmap_iso_bind_group: cmap_iso.bindgroup(),
+            cmap_dvr,
+            cmap_iso,
         }
     }
 
@@ -214,8 +229,8 @@ impl VolumeRenderer {
         });
 
         render_pass.set_bind_group(0, &frame_data.bind_group, &[]);
-        render_pass.set_bind_group(1, frame_data.cmap_dvr_bind_group, &[]);
-        render_pass.set_bind_group(2, frame_data.cmap_iso_bind_group, &[]);
+        render_pass.set_bind_group(1, frame_data.cmap_dvr.bindgroup(), &[]);
+        render_pass.set_bind_group(2, frame_data.cmap_iso.bindgroup(), &[]);
         render_pass.set_pipeline(&self.pipeline);
 
         render_pass.draw(0..4, 0..1);
@@ -279,10 +294,10 @@ impl VolumeRenderer {
     }
 }
 
-pub struct PerFrameData<'a> {
+pub struct PerFrameData {
     pub(crate) bind_group: wgpu::BindGroup,
-    cmap_dvr_bind_group: &'a wgpu::BindGroup,
-    cmap_iso_bind_group: &'a wgpu::BindGroup,
+    cmap_dvr: ColorMapGPU,
+    cmap_iso: ColorMapGPU,
 }
 
 #[repr(C)]
@@ -355,6 +370,8 @@ pub struct DVRSettings {
     pub vmax: Option<f32>,
 
     pub distance_scale: f32,
+
+    pub cmap: ColorMap,
 }
 
 #[cfg(feature = "python")]
@@ -382,6 +399,12 @@ impl Default for DVRSettings {
             vmin: None,
             vmax: None,
             distance_scale: 1.0,
+            cmap: COLORMAPS
+                .get("seaborn")
+                .unwrap()
+                .get("icefire")
+                .unwrap()
+                .clone(),
         }
     }
 }
@@ -408,7 +431,10 @@ pub struct IsoSettings {
     pub light_color: Vector3<f32>,
 
     /// Channel used for coloring the iso surface
+    #[serde(default)]
     pub color_channel: usize,
+
+    pub color: ColorMode,
 }
 
 impl Default for IsoSettings {
@@ -421,7 +447,8 @@ impl Default for IsoSettings {
             ambient_color: Vector3::zero(),
             specular_color: Vector3::new(0.7, 0.7, 0.7),
             light_color: Vector3::new(1., 1., 1.),
-            color_channel: 1,
+            color_channel: 0,
+            color: ColorMode::Constant(Vector3::new(0.5, 0.5, 0.5)),
         }
     }
 }
@@ -516,6 +543,7 @@ pub struct RenderSettings {
     pub background_color: wgpu::Color,
 
     pub near_clip_plane: Option<f32>,
+    #[serde(default)]
     pub scalar_channel: usize,
 }
 
@@ -576,7 +604,7 @@ impl Default for RenderSettings {
             iso_surface: IsoSettings::default(),
             ssao: SSAOSettings::default(),
             near_clip_plane: None,
-            scalar_channel:0
+            scalar_channel: 0,
         }
     }
 }
@@ -627,8 +655,12 @@ impl RenderSettingsUniform {
             step_size: state.step_size,
             spatial_filter: state.settings.spatial_filter as u32,
             distance_scale: dvr_settings.distance_scale,
-            vmin: dvr_settings.vmin.unwrap_or(volume.min_value(0)),
-            vmax: dvr_settings.vmax.unwrap_or(volume.max_value(0)),
+            vmin: dvr_settings
+                .vmin
+                .unwrap_or(volume.min_value(state.settings.scalar_channel)),
+            vmax: dvr_settings
+                .vmax
+                .unwrap_or(volume.max_value(state.settings.scalar_channel)),
             gamma_correction: state.gamma_correction as u32,
             render_volume: state.settings.dvr.enabled as u32,
             render_iso: state.settings.iso_surface.enabled as u32,
@@ -921,4 +953,122 @@ impl Display {
         render_pass.set_bind_group(1, &frame_buffer.bind_group, &[]);
         render_pass.draw(0..4, 0..1);
     }
+}
+
+pub struct ColorMapGPU {
+    texture: wgpu::Texture,
+    bindgroup: wgpu::BindGroup,
+}
+
+impl ColorMapGPU {
+    pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, cmap: &ColorMap, n: u32) -> Self {
+        let texture = device.create_texture_with_data(
+            queue,
+            &wgpu::TextureDescriptor {
+                label: Some("cmap texture"),
+                size: Extent3d {
+                    width: n,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            },
+            wgpu::util::TextureDataOrder::LayerMajor,
+            bytemuck::cast_slice(&cmap.rasterize(n as usize)),
+        );
+
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("cmap sampler"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+
+        let bindgroup = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("cmap bind group"),
+            layout: &Self::bind_group_layout(device),
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(
+                        &texture.create_view(&wgpu::TextureViewDescriptor::default()),
+                    ),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+            ],
+        });
+        Self { texture, bindgroup }
+    }
+
+    fn size(&self) -> u32 {
+        return self.texture.size().width;
+    }
+
+    pub fn texture(&self) -> &wgpu::Texture {
+        &self.texture
+    }
+
+    pub fn bindgroup(&self) -> &wgpu::BindGroup {
+        &self.bindgroup
+    }
+
+    pub(crate) fn bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("cmap bind group layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        })
+    }
+
+    pub fn update(&self, queue: &wgpu::Queue, cmap: &ColorMap) {
+        queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &self.texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            bytemuck::cast_slice(&cmap.rasterize(self.size() as usize)),
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: None,
+                rows_per_image: None,
+            },
+            wgpu::Extent3d {
+                width: self.size() as u32,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum ColorMode {
+    Constant(Vector3<f32>),
+    ColorMap(ColorMap),
 }

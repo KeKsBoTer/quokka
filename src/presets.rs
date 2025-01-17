@@ -8,7 +8,7 @@ use once_cell::sync::Lazy;
 use pyo3::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::{cmap::LinearSegmentedColorMap, renderer::RenderSettings};
+use crate::renderer::RenderSettings;
 
 static PRESETS_FOLDER: include_dir::Dir = include_dir!("presets");
 
@@ -44,8 +44,6 @@ pub static PRESETS: once_cell::sync::Lazy<HashMap<String, Preset>> =
 pub struct Preset {
     pub name: String,
     pub render_settings: RenderSettings,
-    pub cmap_dvr: Option<LinearSegmentedColorMap>,
-    pub cmap_iso: Option<LinearSegmentedColorMap>,
     pub camera: Option<Point3<f32>>,
 }
 
@@ -62,7 +60,7 @@ impl Preset {
     fn __new__(
         name: String,
         render_settings: RenderSettings,
-        cmap: Option<LinearSegmentedColorMap>,
+        cmap: Option<ColorMap>,
         camera: Option<(f32, f32, f32)>,
     ) -> Self {
         Preset {
