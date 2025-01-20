@@ -13,6 +13,7 @@ use crate::renderer::RenderSettings;
 static PRESETS_FOLDER: include_dir::Dir = include_dir!("presets");
 
 fn load_presets(dir: &Dir) -> HashMap<String, Preset> {
+    log::debug!("Loading presets from {:?}", dir.entries());
     let cmaps: HashMap<String, Preset> = dir
         .files()
         .filter_map(|f| {

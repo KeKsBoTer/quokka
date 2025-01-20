@@ -371,7 +371,17 @@ pub struct DVRSettings {
 
     pub distance_scale: f32,
 
+    #[serde(default="default_cmap")]
     pub cmap: ColorMap,
+}
+
+fn default_cmap() -> ColorMap {
+    COLORMAPS
+        .get("seaborn")
+        .unwrap()
+        .get("icefire")
+        .unwrap()
+        .clone()
 }
 
 #[cfg(feature = "python")]
@@ -434,6 +444,7 @@ pub struct IsoSettings {
     #[serde(default)]
     pub color_channel: usize,
 
+    #[serde(default )]
     pub color: ColorMode,
 }
 
@@ -543,6 +554,7 @@ pub struct RenderSettings {
     pub background_color: wgpu::Color,
 
     pub near_clip_plane: Option<f32>,
+
     #[serde(default)]
     pub scalar_channel: usize,
 }
@@ -1071,4 +1083,10 @@ impl ColorMapGPU {
 pub enum ColorMode {
     Constant(Vector3<f32>),
     ColorMap(ColorMap),
+}
+
+impl Default for ColorMode {
+    fn default() -> Self {
+        ColorMode::Constant(Vector3::new(0.5, 0.5, 0.5))
+    }
 }

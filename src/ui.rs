@@ -642,6 +642,7 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
                         if let ColorMode::ColorMap(cmap) =
                             &state.render_state.settings.iso_surface.color
                         {
+                            ui.heading("Iso Surface Colormap");
                             let min = state
                                 .volume
                                 .volume
